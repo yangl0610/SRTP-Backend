@@ -830,6 +830,7 @@ components:
       type: object
       required:
         - id
+        - public_id
         - auth_uid
         - nickname
         - avatar_url
@@ -842,6 +843,9 @@ components:
         id:
           type: integer
           format: int64
+        public_id:
+          type: string
+          format: uuid
         auth_uid:
           type: string
         nickname:
@@ -878,22 +882,28 @@ components:
           format: int64
     RoomOwner:
       type: object
-      required: [id, nickname, avatar_url]
+      required: [id, public_id, nickname, avatar_url]
       properties:
         id:
           type: integer
           format: int64
+        public_id:
+          type: string
+          format: uuid
         nickname:
           type: string
         avatar_url:
           type: string
     RoomMember:
       type: object
-      required: [user_id, nickname, avatar_url, role, status]
+      required: [user_id, user_public_id, nickname, avatar_url, role, status]
       properties:
         user_id:
           type: integer
           format: int64
+        user_public_id:
+          type: string
+          format: uuid
         nickname:
           type: string
         avatar_url:
@@ -906,6 +916,7 @@ components:
       type: object
       required:
         - id
+        - public_id
         - name
         - sport_type
         - campus_name
@@ -924,6 +935,9 @@ components:
         id:
           type: integer
           format: int64
+        public_id:
+          type: string
+          format: uuid
         name:
           type: string
         sport_type:
@@ -977,6 +991,7 @@ components:
       type: object
       required:
         - id
+        - public_id
         - name
         - sport_type
         - campus_name
@@ -997,6 +1012,9 @@ components:
         id:
           type: integer
           format: int64
+        public_id:
+          type: string
+          format: uuid
         name:
           type: string
         sport_type:
@@ -1141,11 +1159,14 @@ components:
           maxLength: 16
     JoinRoomResult:
       type: object
-      required: [room_id, join_result]
+      required: [room_id, room_public_id, join_result]
       properties:
         room_id:
           type: integer
           format: int64
+        room_public_id:
+          type: string
+          format: uuid
         join_result:
           type: string
         member_status:
@@ -1300,6 +1321,7 @@ components:
       type: object
       required:
         - room_id
+        - room_public_id
         - provider
         - reservation_status
         - sport_type
@@ -1312,6 +1334,9 @@ components:
         room_id:
           type: integer
           format: int64
+        room_public_id:
+          type: string
+          format: uuid
         provider:
           type: string
         reservation_status:
@@ -1346,7 +1371,9 @@ components:
       type: object
       required:
         - id
+        - public_id
         - room_id
+        - room_public_id
         - provider
         - reservation_status
         - sport_type
@@ -1361,9 +1388,15 @@ components:
         id:
           type: integer
           format: int64
+        public_id:
+          type: string
+          format: uuid
         room_id:
           type: integer
           format: int64
+        room_public_id:
+          type: string
+          format: uuid
         provider:
           type: string
         reservation_status:

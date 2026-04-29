@@ -1,9 +1,14 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Room struct {
 	ID                  uint      `gorm:"primaryKey"`
+	PublicID            string    `gorm:"type:uuid;uniqueIndex;not null"`
 	OwnerID             uint      `gorm:"not null;index"`
 	Name                string    `gorm:"size:32;not null"`
 	SportType           string    `gorm:"size:32;not null;index"`
@@ -26,4 +31,9 @@ type Room struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	Owner               User `gorm:"constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;foreignKey:OwnerID;references:ID"`
+}
+
+func (r *Room) BeforeCreate(_ *gorm.DB) error {
+	ensurePublicID(&r.PublicID)
+	return nil
 }

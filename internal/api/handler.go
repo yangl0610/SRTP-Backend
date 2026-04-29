@@ -12,6 +12,7 @@ import (
 	"github.com/QSCTech/SRTP-Backend/models"
 	"github.com/QSCTech/SRTP-Backend/pkg/response"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"gorm.io/gorm"
 )
@@ -390,7 +391,12 @@ func (h *Handler) PreviewRoomReservation(c *gin.Context, roomId int64) {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.JSON(c, http.StatusOK, buildReservationPreviewResponse(preview))
+	room, _, roomErr := h.roomService.GetByID(c.Request.Context(), uint(roomId))
+	if roomErr != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch room")
+		return
+	}
+	response.JSON(c, http.StatusOK, buildReservationPreviewResponse(preview, room.PublicID))
 }
 
 func (h *Handler) SubmitRoomReservation(c *gin.Context, roomId int64) {
@@ -404,11 +410,16 @@ func (h *Handler) SubmitRoomReservation(c *gin.Context, roomId int64) {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.JSON(c, http.StatusOK, buildReservationRecordResponse(reservation))
+	room, _, roomErr := h.roomService.GetByID(c.Request.Context(), uint(roomId))
+	if roomErr != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch room")
+		return
+	}
+	response.JSON(c, http.StatusOK, buildReservationRecordResponse(reservation, room.PublicID))
 }
 
 func buildUserResponse(user *models.User) gen.UserResponse {
-	return gen.UserResponse{Id: int64(user.ID), AuthUid: user.AuthUID, Nickname: user.Nickname, AvatarUrl: user.AvatarURL, Gender: user.Gender, Bio: user.Bio, ProfileStatus: user.ProfileStatus, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}
+	return gen.UserResponse{Id: int64(user.ID), PublicId: mustParseUUID(user.PublicID), AuthUid: user.AuthUID, Nickname: user.Nickname, AvatarUrl: user.AvatarURL, Gender: user.Gender, Bio: user.Bio, ProfileStatus: user.ProfileStatus, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}
 }
 
 func buildRoomCardPage(rooms *service.ListRoomsOutput) gen.RoomCardPage {
@@ -423,6 +434,7 @@ func buildRoomCard(item service.RoomCardItem) gen.RoomCard {
 	room := item.Room
 	return gen.RoomCard{
 		Id:                 int64(room.ID),
+		PublicId:           mustParseUUID(room.PublicID),
 		Name:               room.Name,
 		SportType:          room.SportType,
 		CampusName:         room.CampusName,
@@ -443,12 +455,13 @@ func buildRoomCard(item service.RoomCardItem) gen.RoomCard {
 func (h *Handler) buildRoomDetail(ctx context.Context, room *models.Room, members []models.RoomMember) gen.RoomDetail {
 	memberItems := make([]gen.RoomMember, 0, len(members))
 	for _, member := range members {
-		memberItems = append(memberItems, gen.RoomMember{UserId: int64(member.UserID), Nickname: member.User.Nickname, AvatarUrl: member.User.AvatarURL, Role: member.Role, Status: member.Status})
+		memberItems = append(memberItems, gen.RoomMember{UserId: int64(member.UserID), UserPublicId: mustParseUUID(member.User.PublicID), Nickname: member.User.Nickname, AvatarUrl: member.User.AvatarURL, Role: member.Role, Status: member.Status})
 	}
 	currentUser, _ := h.userService.GetCurrent(ctx)
 	isOwner := currentUser != nil && currentUser.ID == room.OwnerID
 	return gen.RoomDetail{
 		Id:                  int64(room.ID),
+		PublicId:            mustParseUUID(room.PublicID),
 		Name:                room.Name,
 		SportType:           room.SportType,
 		CampusName:          room.CampusName,
@@ -467,7 +480,7 @@ func (h *Handler) buildRoomDetail(ctx context.Context, room *models.Room, member
 		LevelDesc:           stringPtrOrNil(room.LevelDesc),
 		Description:         stringPtrOrNil(room.Description),
 		InviteCode:          stringPtrOrNil(room.InviteCode),
-		Owner:               gen.RoomOwner{Id: int64(room.Owner.ID), Nickname: room.Owner.Nickname, AvatarUrl: room.Owner.AvatarURL},
+		Owner:               gen.RoomOwner{Id: int64(room.Owner.ID), PublicId: mustParseUUID(room.Owner.PublicID), Nickname: room.Owner.Nickname, AvatarUrl: room.Owner.AvatarURL},
 		Members:             memberItems,
 		CurrentMemberCount:  int32(countCurrentMembers(members)),
 		IsOwner:             isOwner,
@@ -476,7 +489,7 @@ func (h *Handler) buildRoomDetail(ctx context.Context, room *models.Room, member
 }
 
 func buildJoinRoomResult(result *service.JoinRoomOutput) gen.JoinRoomResult {
-	return gen.JoinRoomResult{RoomId: int64(result.RoomID), JoinResult: result.JoinResult, MemberStatus: result.MemberStatus, RequestStatus: result.RequestStatus}
+	return gen.JoinRoomResult{RoomId: int64(result.RoomID), RoomPublicId: mustParseUUID(result.RoomPublicID), JoinResult: result.JoinResult, MemberStatus: result.MemberStatus, RequestStatus: result.RequestStatus}
 }
 
 func buildReservationPreviewInput(roomID uint, req gen.ReservationSubmitRequest) service.ReservationPreviewInput {
@@ -496,9 +509,10 @@ func buildReservationPreviewInput(roomID uint, req gen.ReservationSubmitRequest)
 	}
 }
 
-func buildReservationPreviewResponse(preview *service.ReservationPreviewOutput) gen.ReservationPreviewResponse {
+func buildReservationPreviewResponse(preview *service.ReservationPreviewOutput, roomPublicID string) gen.ReservationPreviewResponse {
 	return gen.ReservationPreviewResponse{
 		RoomId:            int64(preview.RoomID),
+		RoomPublicId:      mustParseUUID(roomPublicID),
 		Provider:          preview.Provider,
 		ReservationStatus: preview.ReservationStatus,
 		SportType:         preview.SportType,
@@ -515,10 +529,12 @@ func buildReservationPreviewResponse(preview *service.ReservationPreviewOutput) 
 	}
 }
 
-func buildReservationRecordResponse(reservation *models.RoomReservation) gen.ReservationRecordResponse {
+func buildReservationRecordResponse(reservation *models.RoomReservation, roomPublicID string) gen.ReservationRecordResponse {
 	return gen.ReservationRecordResponse{
 		Id:                int64(reservation.ID),
+		PublicId:          mustParseUUID(reservation.PublicID),
 		RoomId:            int64(reservation.RoomID),
+		RoomPublicId:      mustParseUUID(roomPublicID),
 		Provider:          reservation.Provider,
 		ReservationStatus: reservation.ReservationStatus,
 		SportType:         reservation.SportType,
@@ -605,4 +621,15 @@ func mustParseDate(value string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+func mustParseUUID(value string) openapi_types.UUID {
+	if value == "" {
+		return openapi_types.UUID{}
+	}
+	parsed, err := uuid.Parse(value)
+	if err != nil {
+		return openapi_types.UUID{}
+	}
+	return openapi_types.UUID(parsed)
 }

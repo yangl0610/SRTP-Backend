@@ -27,6 +27,14 @@ func (r *UserRepository) GetByID(ctx context.Context, id uint) (*models.User, er
 	return &user, nil
 }
 
+func (r *UserRepository) GetByPublicID(ctx context.Context, publicID string) (*models.User, error) {
+	var user models.User
+	if err := r.db.WithContext(ctx).Where("public_id = ?", publicID).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *UserRepository) GetByAuthUID(ctx context.Context, authUID string) (*models.User, error) {
 	var user models.User
 	if err := r.db.WithContext(ctx).Where("auth_uid = ?", authUID).First(&user).Error; err != nil {

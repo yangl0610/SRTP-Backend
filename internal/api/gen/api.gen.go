@@ -70,10 +70,11 @@ type JoinRoomByCodeRequest struct {
 
 // JoinRoomResult defines model for JoinRoomResult.
 type JoinRoomResult struct {
-	JoinResult    string  `json:"join_result"`
-	MemberStatus  *string `json:"member_status,omitempty"`
-	RequestStatus *string `json:"request_status,omitempty"`
-	RoomId        int64   `json:"room_id"`
+	JoinResult    string             `json:"join_result"`
+	MemberStatus  *string            `json:"member_status,omitempty"`
+	RequestStatus *string            `json:"request_status,omitempty"`
+	RoomId        int64              `json:"room_id"`
+	RoomPublicId  openapi_types.UUID `json:"room_public_id"`
 }
 
 // MemberActionResponse defines model for MemberActionResponse.
@@ -124,6 +125,7 @@ type ReservationPreviewResponse struct {
 	ReservationDate   openapi_types.Date `json:"reservation_date"`
 	ReservationStatus string             `json:"reservation_status"`
 	RoomId            int64              `json:"room_id"`
+	RoomPublicId      openapi_types.UUID `json:"room_public_id"`
 	SpaceId           *int64             `json:"space_id,omitempty"`
 	SpaceName         *string            `json:"space_name,omitempty"`
 	SportType         string             `json:"sport_type"`
@@ -143,9 +145,11 @@ type ReservationRecordResponse struct {
 	ExternalTradeNo   *string            `json:"external_trade_no,omitempty"`
 	Id                int64              `json:"id"`
 	Provider          string             `json:"provider"`
+	PublicId          openapi_types.UUID `json:"public_id"`
 	ReservationDate   openapi_types.Date `json:"reservation_date"`
 	ReservationStatus string             `json:"reservation_status"`
 	RoomId            int64              `json:"room_id"`
+	RoomPublicId      openapi_types.UUID `json:"room_public_id"`
 	SpaceId           *int64             `json:"space_id,omitempty"`
 	SpaceName         *string            `json:"space_name,omitempty"`
 	SportType         string             `json:"sport_type"`
@@ -257,21 +261,22 @@ type ReviewJoinRequestRequest struct {
 
 // RoomCard defines model for RoomCard.
 type RoomCard struct {
-	CampusName         string    `json:"campus_name"`
-	CurrentMemberCount int32     `json:"current_member_count"`
-	EndTime            time.Time `json:"end_time"`
-	Id                 int64     `json:"id"`
-	JoinMode           string    `json:"join_mode"`
-	MaxMemberCount     int32     `json:"max_member_count"`
-	Name               string    `json:"name"`
-	OwnerAvatarUrl     string    `json:"owner_avatar_url"`
-	OwnerNickname      string    `json:"owner_nickname"`
-	ReservationStatus  string    `json:"reservation_status"`
-	SportType          string    `json:"sport_type"`
-	StartTime          time.Time `json:"start_time"`
-	Status             string    `json:"status"`
-	VenueName          string    `json:"venue_name"`
-	Visibility         string    `json:"visibility"`
+	CampusName         string             `json:"campus_name"`
+	CurrentMemberCount int32              `json:"current_member_count"`
+	EndTime            time.Time          `json:"end_time"`
+	Id                 int64              `json:"id"`
+	JoinMode           string             `json:"join_mode"`
+	MaxMemberCount     int32              `json:"max_member_count"`
+	Name               string             `json:"name"`
+	OwnerAvatarUrl     string             `json:"owner_avatar_url"`
+	OwnerNickname      string             `json:"owner_nickname"`
+	PublicId           openapi_types.UUID `json:"public_id"`
+	ReservationStatus  string             `json:"reservation_status"`
+	SportType          string             `json:"sport_type"`
+	StartTime          time.Time          `json:"start_time"`
+	Status             string             `json:"status"`
+	VenueName          string             `json:"venue_name"`
+	Visibility         string             `json:"visibility"`
 }
 
 // RoomCardPage defines model for RoomCardPage.
@@ -284,46 +289,49 @@ type RoomCardPage struct {
 
 // RoomDetail defines model for RoomDetail.
 type RoomDetail struct {
-	CampusName          string       `json:"campus_name"`
-	CurrentMemberCount  int32        `json:"current_member_count"`
-	Description         *string      `json:"description,omitempty"`
-	EndTime             time.Time    `json:"end_time"`
-	GenderRule          *string      `json:"gender_rule,omitempty"`
-	Id                  int64        `json:"id"`
-	InviteCode          *string      `json:"invite_code,omitempty"`
-	IsOwner             bool         `json:"is_owner"`
-	JoinMode            string       `json:"join_mode"`
-	Joinable            bool         `json:"joinable"`
-	LevelDesc           *string      `json:"level_desc,omitempty"`
-	MemberLimit         *int32       `json:"member_limit,omitempty"`
-	Members             []RoomMember `json:"members"`
-	Name                string       `json:"name"`
-	NeedReservation     bool         `json:"need_reservation"`
-	Organization        *string      `json:"organization,omitempty"`
-	Owner               RoomOwner    `json:"owner"`
-	ReservationProvider *string      `json:"reservation_provider,omitempty"`
-	ReservationStatus   string       `json:"reservation_status"`
-	SportType           string       `json:"sport_type"`
-	StartTime           time.Time    `json:"start_time"`
-	Status              string       `json:"status"`
-	VenueName           string       `json:"venue_name"`
-	Visibility          string       `json:"visibility"`
+	CampusName          string             `json:"campus_name"`
+	CurrentMemberCount  int32              `json:"current_member_count"`
+	Description         *string            `json:"description,omitempty"`
+	EndTime             time.Time          `json:"end_time"`
+	GenderRule          *string            `json:"gender_rule,omitempty"`
+	Id                  int64              `json:"id"`
+	InviteCode          *string            `json:"invite_code,omitempty"`
+	IsOwner             bool               `json:"is_owner"`
+	JoinMode            string             `json:"join_mode"`
+	Joinable            bool               `json:"joinable"`
+	LevelDesc           *string            `json:"level_desc,omitempty"`
+	MemberLimit         *int32             `json:"member_limit,omitempty"`
+	Members             []RoomMember       `json:"members"`
+	Name                string             `json:"name"`
+	NeedReservation     bool               `json:"need_reservation"`
+	Organization        *string            `json:"organization,omitempty"`
+	Owner               RoomOwner          `json:"owner"`
+	PublicId            openapi_types.UUID `json:"public_id"`
+	ReservationProvider *string            `json:"reservation_provider,omitempty"`
+	ReservationStatus   string             `json:"reservation_status"`
+	SportType           string             `json:"sport_type"`
+	StartTime           time.Time          `json:"start_time"`
+	Status              string             `json:"status"`
+	VenueName           string             `json:"venue_name"`
+	Visibility          string             `json:"visibility"`
 }
 
 // RoomMember defines model for RoomMember.
 type RoomMember struct {
-	AvatarUrl string `json:"avatar_url"`
-	Nickname  string `json:"nickname"`
-	Role      string `json:"role"`
-	Status    string `json:"status"`
-	UserId    int64  `json:"user_id"`
+	AvatarUrl    string             `json:"avatar_url"`
+	Nickname     string             `json:"nickname"`
+	Role         string             `json:"role"`
+	Status       string             `json:"status"`
+	UserId       int64              `json:"user_id"`
+	UserPublicId openapi_types.UUID `json:"user_public_id"`
 }
 
 // RoomOwner defines model for RoomOwner.
 type RoomOwner struct {
-	AvatarUrl string `json:"avatar_url"`
-	Id        int64  `json:"id"`
-	Nickname  string `json:"nickname"`
+	AvatarUrl string             `json:"avatar_url"`
+	Id        int64              `json:"id"`
+	Nickname  string             `json:"nickname"`
+	PublicId  openapi_types.UUID `json:"public_id"`
 }
 
 // UpdateProfileRequest Update current user profile. Nickname and bio must pass synchronous blocked-word validation before persistence.
@@ -351,15 +359,13 @@ type UpdateRoomRequest struct {
 
 // User defines model for User.
 type User struct {
-	AuthUid   string    `json:"auth_uid"`
-	AvatarUrl string    `json:"avatar_url"`
-	Bio       string    `json:"bio"`
-	CreatedAt time.Time `json:"created_at"`
-	Gender    string    `json:"gender"`
-	Id        int64     `json:"id"`
-	Nickname  string    `json:"nickname"`
-
-	// ProfileStatus Current profile state. This version uses synchronous blocked-word validation instead of manual review workflow.
+	AuthUid       string    `json:"auth_uid"`
+	AvatarUrl     string    `json:"avatar_url"`
+	Bio           string    `json:"bio"`
+	CreatedAt     time.Time `json:"created_at"`
+	Gender        string    `json:"gender"`
+	Id            int64     `json:"id"`
+	Nickname      string    `json:"nickname"`
 	ProfileStatus string    `json:"profile_status"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

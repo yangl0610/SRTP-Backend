@@ -1,9 +1,14 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type RoomReservation struct {
 	ID                uint   `gorm:"primaryKey"`
+	PublicID          string `gorm:"type:uuid;uniqueIndex;not null"`
 	RoomID            uint   `gorm:"not null;index"`
 	Provider          string `gorm:"size:32;not null;default:'tyys'"`
 	SportType         string `gorm:"size:32;not null"`
@@ -31,4 +36,9 @@ type RoomReservation struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Room              Room `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;foreignKey:RoomID;references:ID"`
+}
+
+func (r *RoomReservation) BeforeCreate(_ *gorm.DB) error {
+	ensurePublicID(&r.PublicID)
+	return nil
 }

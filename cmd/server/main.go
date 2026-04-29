@@ -20,6 +20,7 @@ import (
 	"github.com/QSCTech/SRTP-Backend/models"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -45,6 +46,14 @@ func main() {
 	gormDB, err := database.NewPostgres(cfg, log)
 	if err != nil {
 		log.Fatal("initialize database", zap.Error(err))
+	}
+
+	if err := preparePublicIDColumns(gormDB); err != nil {
+		log.Fatal("prepare public_id columns", zap.Error(err))
+	}
+
+	if err := backfillPublicIDs(gormDB); err != nil {
+		log.Fatal("backfill public ids", zap.Error(err))
 	}
 
 	if err := gormDB.AutoMigrate(
@@ -128,4 +137,103 @@ func main() {
 	}
 
 	log.Info("server stopped")
+}
+
+func preparePublicIDColumns(db *gorm.DB) error {
+	for _, table := range []string{
+		"users",
+		"rooms",
+		"join_requests",
+		"room_reservations",
+		"notifications",
+	} {
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS public_id uuid", table)).Error; err != nil {
+			return fmt.Errorf("prepare %s.public_id: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func backfillPublicIDs(gormDB *gorm.DB) error {
+	if err := backfillUserPublicIDs(gormDB); err != nil {
+		return err
+	}
+	if err := backfillRoomPublicIDs(gormDB); err != nil {
+		return err
+	}
+	if err := backfillJoinRequestPublicIDs(gormDB); err != nil {
+		return err
+	}
+	if err := backfillRoomReservationPublicIDs(gormDB); err != nil {
+		return err
+	}
+	if err := backfillNotificationPublicIDs(gormDB); err != nil {
+		return err
+	}
+	return nil
+}
+
+func backfillUserPublicIDs(db *gorm.DB) error {
+	var items []models.User
+	if err := db.Where("public_id IS NULL").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := db.Model(&models.User{}).Where("id = ?", item.ID).Update("public_id", models.NewPublicID()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func backfillRoomPublicIDs(db *gorm.DB) error {
+	var items []models.Room
+	if err := db.Where("public_id IS NULL").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := db.Model(&models.Room{}).Where("id = ?", item.ID).Update("public_id", models.NewPublicID()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func backfillJoinRequestPublicIDs(db *gorm.DB) error {
+	var items []models.JoinRequest
+	if err := db.Where("public_id IS NULL").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := db.Model(&models.JoinRequest{}).Where("id = ?", item.ID).Update("public_id", models.NewPublicID()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func backfillRoomReservationPublicIDs(db *gorm.DB) error {
+	var items []models.RoomReservation
+	if err := db.Where("public_id IS NULL").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := db.Model(&models.RoomReservation{}).Where("id = ?", item.ID).Update("public_id", models.NewPublicID()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func backfillNotificationPublicIDs(db *gorm.DB) error {
+	var items []models.Notification
+	if err := db.Where("public_id IS NULL").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := db.Model(&models.Notification{}).Where("id = ?", item.ID).Update("public_id", models.NewPublicID()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -91,6 +91,7 @@ type ListRoomsOutput struct {
 
 type JoinRoomOutput struct {
 	RoomID        uint
+	RoomPublicID  string
 	JoinResult    string
 	MemberStatus  *string
 	RequestStatus *string

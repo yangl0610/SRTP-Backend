@@ -30,3 +30,19 @@ func (r *ReservationRepository) GetLatestByRoomID(ctx context.Context, roomID ui
 	}
 	return &reservation, nil
 }
+
+func (r *ReservationRepository) GetByID(ctx context.Context, id uint) (*models.RoomReservation, error) {
+	var reservation models.RoomReservation
+	if err := r.db.WithContext(ctx).First(&reservation, id).Error; err != nil {
+		return nil, err
+	}
+	return &reservation, nil
+}
+
+func (r *ReservationRepository) GetByPublicID(ctx context.Context, publicID string) (*models.RoomReservation, error) {
+	var reservation models.RoomReservation
+	if err := r.db.WithContext(ctx).Where("public_id = ?", publicID).First(&reservation).Error; err != nil {
+		return nil, err
+	}
+	return &reservation, nil
+}

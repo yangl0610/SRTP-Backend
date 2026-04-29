@@ -44,6 +44,14 @@ func (r *RoomRepository) GetByID(ctx context.Context, id uint) (*models.Room, er
 	return &room, nil
 }
 
+func (r *RoomRepository) GetByPublicID(ctx context.Context, publicID string) (*models.Room, error) {
+	var room models.Room
+	if err := r.db.WithContext(ctx).Preload("Owner").Where("public_id = ?", publicID).First(&room).Error; err != nil {
+		return nil, err
+	}
+	return &room, nil
+}
+
 func (r *RoomRepository) GetByInviteCode(ctx context.Context, code string) (*models.Room, error) {
 	var room models.Room
 	if err := r.db.WithContext(ctx).Preload("Owner").Where("invite_code = ?", code).First(&room).Error; err != nil {
@@ -180,6 +188,14 @@ func (r *RoomRepository) CreateJoinRequest(ctx context.Context, req *models.Join
 func (r *RoomRepository) GetJoinRequestByID(ctx context.Context, requestID uint) (*models.JoinRequest, error) {
 	var req models.JoinRequest
 	if err := r.db.WithContext(ctx).First(&req, requestID).Error; err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (r *RoomRepository) GetJoinRequestByPublicID(ctx context.Context, publicID string) (*models.JoinRequest, error) {
+	var req models.JoinRequest
+	if err := r.db.WithContext(ctx).Where("public_id = ?", publicID).First(&req).Error; err != nil {
 		return nil, err
 	}
 	return &req, nil
