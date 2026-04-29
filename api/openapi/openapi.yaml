@@ -1,4 +1,4 @@
-﻿openapi: 3.0.3
+openapi: 3.0.3
 info:
   title: SRTP Backend API
   version: 0.2.0
@@ -610,6 +610,122 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reservations/templates:
+    get:
+      operationId: listReservationTemplates
+      summary: List venue template (static structure)
+      description: |
+        查询场馆的固定结构信息（分场列表、固定时间段模板）。
+        不依赖 TYYS 实时查询窗口，适合在创建远期预约计划前让用户选择时间段。
+      parameters:
+        - in: query
+          name: sport_type
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: campus_name
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: venue_name
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Venue template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationTemplateResponse'
+        '400':
+          description: Invalid query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /rooms/{roomId}/reservation/plan:
+    post:
+      operationId: createRoomReservationPlan
+      summary: Create a reservation plan for a future date (>2 days)
+      description: |
+        为 2 天后的日期创建预约计划，保存预约意图到数据库。
+        系统会在预约日期前 2 天的上午 09:00 自动补全 slot 上下文并提交 TYYS。
+      parameters:
+        - $ref: '#/components/parameters/RoomIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationPlanRequest'
+      responses:
+        '200':
+          description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationRecordResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/tasks/reservation-materialize:
+    post:
+      operationId: triggerReservationMaterialize
+      summary: Materialize scheduled reservation plans (internal scheduler use)
+      description: |
+        供调度器调用。将指定日期的 scheduled 计划补全为可执行的 slot 上下文，然后触发提交。
+        每天 09:00 由调度器对"两天后"的计划执行一次。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationMaterializeRequest'
+      responses:
+        '200':
+          description: Materialize result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationMaterializeResult'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/tasks/reservation-trigger:
+    post:
+      operationId: triggerReservation
+      summary: Trigger a specific reservation submission (internal scheduler use)
+      description: |
+        供调度器调用。原子地将预约状态从 pending 切换到 submitting 并提交 TYYS。
+        包含验证码失败重试（最多 5 次）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationTriggerRequest'
+      responses:
+        '200':
+          description: Trigger result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationRecordResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   parameters:
     UserIdPath:
@@ -1169,6 +1285,17 @@ components:
           format: int64
         space_name:
           type: string
+        time_id:
+          type: integer
+          format: int64
+          description: TYYS 时间段ID，实时预约必填
+        token:
+          type: string
+          description: TYYS slot token，实时预约必填
+        week_start_date:
+          type: string
+          format: date
+          description: TYYS 周起始日期，默认取 reservation_date
     ReservationPreviewResponse:
       type: object
       required:
@@ -1277,3 +1404,113 @@ components:
         updated_at:
           type: string
           format: date-time
+    ReservationTemplateSpace:
+      type: object
+      required: [space_id, space_name]
+      properties:
+        space_id:
+          type: integer
+          format: int64
+        space_name:
+          type: string
+    ReservationTemplateTimeSlot:
+      type: object
+      required: [start_time, end_time, display_label]
+      properties:
+        time_id:
+          type: integer
+          format: int64
+        start_time:
+          type: string
+          example: "08:00"
+        end_time:
+          type: string
+          example: "09:00"
+        display_label:
+          type: string
+          example: "08:00-09:00"
+    ReservationTemplateResponse:
+      type: object
+      required: [sport_type, campus_name, venue_name, venue_site_id, spaces, time_slots]
+      description: 场馆固定结构信息，用于创建预约计划时选择时间段
+      properties:
+        sport_type:
+          type: string
+        campus_name:
+          type: string
+        venue_name:
+          type: string
+        venue_id:
+          type: integer
+          format: int64
+        venue_site_id:
+          type: integer
+          format: int64
+        spaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationTemplateSpace'
+        time_slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationTemplateTimeSlot'
+    ReservationPlanRequest:
+      type: object
+      required:
+        - sport_type
+        - campus_name
+        - venue_name
+        - reservation_date
+        - start_time
+        - end_time
+      description: 创建预约计划请求（仅保存预约意图，不立即调 TYYS）
+      properties:
+        sport_type:
+          type: string
+        campus_name:
+          type: string
+        venue_name:
+          type: string
+        reservation_date:
+          type: string
+          format: date
+        start_time:
+          type: string
+          example: "08:00"
+        end_time:
+          type: string
+          example: "09:00"
+        buddy_code:
+          type: string
+    ReservationTriggerRequest:
+      type: object
+      required: [reservation_id]
+      description: 触发单条预约提交（供调度器调用）
+      properties:
+        reservation_id:
+          type: integer
+          format: int64
+    ReservationMaterializeRequest:
+      type: object
+      description: |
+        触发预约计划补全（供调度器调用）。
+        后端自动查找 reserve_open_at <= now 且 status = scheduled 的记录，无需传入日期。
+      properties:
+        dry_run:
+          type: boolean
+          description: 若为 true，只返回待处理计划数量，不实际执行
+    ReservationMaterializeResult:
+      type: object
+      required: [total, succeeded, failed]
+      description: 预约计划批量补全结果，返回本次调度处理的计划数量及失败详情
+      properties:
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
