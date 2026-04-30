@@ -99,17 +99,20 @@ type ReservationMaterializeRequest struct {
 
 // ReservationMaterializeResult 预约计划批量补全结果，返回本次调度处理的计划数量及失败详情
 type ReservationMaterializeResult struct {
-	Errors    *[]string `json:"errors,omitempty"`
-	Failed    int       `json:"failed"`
-	Succeeded int       `json:"succeeded"`
-	Total     int       `json:"total"`
+	Errors *[]string `json:"errors,omitempty"`
+
+	// Expired 本次清理中标记为 expired 的过期失败预约数量
+	Expired   int `json:"expired"`
+	Failed    int `json:"failed"`
+	Succeeded int `json:"succeeded"`
+	Total     int `json:"total"`
 }
 
 // ReservationPlanRequest 创建预约计划请求（仅保存预约意图，不立即调 TYYS）
 type ReservationPlanRequest struct {
 	BuddyCode *string `json:"buddy_code,omitempty"`
 
-	// PlanSlots 首选场次列表，campus/venue/start/end 均在每个 slot 中携带；调度器依次尝试直到一个成功
+	// PlanSlots 选中场次列表，campus/venue/start/end 均在每个 slot 中携带；调度器依次尝试直到一个成功
 	PlanSlots       []ReservationPlanSlotSelection `json:"plan_slots"`
 	ReservationDate openapi_types.Date             `json:"reservation_date"`
 	SportType       string                         `json:"sport_type"`

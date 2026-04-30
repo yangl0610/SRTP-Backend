@@ -131,6 +131,7 @@ type MaterializeResult struct {
 	Total     int
 	Succeeded int
 	Failed    int
+	Expired   int
 	Errors    []string
 }
 
@@ -718,14 +719,28 @@ func (s *ReservationService) MaterializePlans(ctx context.Context, dryRun bool) 
 		}(plan)
 	}
 	wg.Wait()
+
+	// 清理 failed 中预约时段已过期的记录，防止调度器继续无效重试。
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	today := time.Now().In(loc).Format("2006-01-02")
+	if expired, cleanErr := s.reservationRepo.MarkExpiredFailed(ctx, today); cleanErr != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("cleanup expired: %s", cleanErr))
+	} else {
+		result.Expired = int(expired)
+	}
+
 	return result
 }
 
 // materializeOne 补全单条计划的 slot 上下文并提交 TYYS。
-// 仅在 reserve_open_at <= now 时被调用，此时 TYYS 预约窗口已开放，ListSlots 必然可用。
+// 仅在 reserve_open_at <= now 时被调用。failed 状态的计划每小时也会重试（部分场馆窗口尚未开放时的兜底）。
 func (s *ReservationService) materializeOne(ctx context.Context, plan *models.RoomReservation) error {
-	ok, err := s.reservationRepo.AtomicTransitionStatus(ctx, plan.PublicID, "scheduled", "submitting")
-	if err != nil || !ok {
+	// 尝试从 scheduled 或 failed 原子切换到 submitting，防止并发双触发。
+	ok, _ := s.reservationRepo.AtomicTransitionStatus(ctx, plan.PublicID, "scheduled", "submitting")
+	if !ok {
+		ok, _ = s.reservationRepo.AtomicTransitionStatus(ctx, plan.PublicID, "failed", "submitting")
+	}
+	if !ok {
 		return fmt.Errorf("already processing")
 	}
 

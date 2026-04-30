@@ -496,6 +496,7 @@ func (h *Handler) TriggerReservationMaterialize(c *gin.Context) {
 		Total:     result.Total,
 		Succeeded: result.Succeeded,
 		Failed:    result.Failed,
+		Expired:   result.Expired,
 	}
 	if len(result.Errors) > 0 {
 		resp.Errors = &result.Errors

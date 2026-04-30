@@ -1580,7 +1580,7 @@ components:
           description: 若为 true，只返回待处理计划数量，不实际执行
     ReservationMaterializeResult:
       type: object
-      required: [total, succeeded, failed]
+      required: [total, succeeded, failed, expired]
       description: 预约计划批量补全结果，返回本次调度处理的计划数量及失败详情
       properties:
         total:
@@ -1589,6 +1589,9 @@ components:
           type: integer
         failed:
           type: integer
+        expired:
+          type: integer
+          description: 本次清理中标记为 expired 的过期失败预约数量
         errors:
           type: array
           items:
