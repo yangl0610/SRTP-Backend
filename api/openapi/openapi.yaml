@@ -560,7 +560,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /rooms/{roomPublicId}/reservation/preview:
+  /rooms/{roomId}/reservation/preview:
     post:
       operationId: previewRoomReservation
       summary: Preview reservation for a room
@@ -585,7 +585,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /rooms/{roomPublicId}/reservation/submit:
+  /rooms/{roomId}/reservation/submit:
     post:
       operationId: submitRoomReservation
       summary: Submit reservation for a room
@@ -646,7 +646,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /rooms/{roomPublicId}/reservation/plan:
+  /rooms/{roomId}/reservation/plan:
     post:
       operationId: createRoomReservationPlan
       summary: Create a reservation plan for a future date (>2 days)
@@ -746,7 +746,7 @@ components:
         minimum: 1
     RoomPublicIdPath:
       in: path
-      name: roomPublicId
+      name: roomId
       required: true
       schema:
         type: string
@@ -1249,11 +1249,11 @@ components:
     ReservationSlot:
       type: object
       required: [slot_key, start_time, end_time, available]
-      description: 预约时间段
+      description: 预约时间段，包含提交所需的完整执行上下文
       properties:
         slot_key:
           type: string
-          description: 时间段唯一标识，用于提交预约
+          description: 时间段唯一标识
           example: "123456"
         start_time:
           type: string
@@ -1265,10 +1265,34 @@ components:
           example: "2026-04-21 09:30"
         available:
           type: boolean
-          description: 是否可预约
+          description: 是否可预约；预约窗口未开放时为 false
+        campus_name:
+          type: string
+        venue_name:
+          type: string
+        venue_id:
+          type: integer
+          format: int64
+        venue_site_id:
+          type: integer
+          format: int64
+        space_id:
+          type: integer
+          format: int64
         space_name:
           type: string
-          description: 场地名称（如游泳馆免费场）
+          description: 场地名称
+        time_id:
+          type: integer
+          format: int64
+          description: 时间段 ID；预约窗口未开放时可能为空
+        token:
+          type: string
+          description: 提交预约所需 token；预约窗口未开放时为空
+        week_start_date:
+          type: string
+          format: date
+          description: 周起始日期；预约窗口未开放时为空
     ReservationSlotListResponse:
       type: object
       required: [items]

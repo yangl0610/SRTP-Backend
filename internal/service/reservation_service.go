@@ -22,14 +22,16 @@ type ReservationVenueItem struct {
 }
 
 type ReservationSlotItem struct {
-	SlotKey   string
-	StartTime string
-	EndTime   string
-	Available bool
-	SpaceName *string
-	// Internal fields populated from dayInfo response; not exposed via API.
+	SlotKey     string
+	StartTime   string
+	EndTime     string
+	Available   bool
+	CampusName  string
+	VenueName   string
+	VenueID     *uint
 	VenueSiteID uint
 	SpaceID     uint
+	SpaceName   *string
 	TimeID      uint
 	Token       string
 	WeekStart   string
@@ -233,71 +235,74 @@ func textMatches(got, want string) bool {
 }
 
 func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusName, venueName, reservationDate string) ([]ReservationSlotItem, error) {
-	// Step 1: Get venue info to find venueId and venueSiteId
+	// Step 1: 从 VenueInfo 找到 venueId / venueSiteId，同时解析 spaceId 列表供降级用。
 	venueResp, err := s.tyys.VenueInfo(ctx, 0)
 	if err != nil {
 		return nil, fmt.Errorf("get venue info: %w", err)
 	}
 
-	// Find matching venue and extract IDs
-	var venueID, venueSiteID string
+	var venueIDStr, venueSiteIDStr string
+	var resolvedCampus, resolvedVenue string
 	walkVenues(venueResp.Data, func(obj map[string]any) {
-		if venueID != "" {
-			return // already found
-		}
 		sportGot := trimString(obj["sportName"])
 		campusGot := trimString(obj["campusName"])
 		venueGot := trimString(obj["venueName"])
-		if !textMatches(sportGot, sportType) {
+		if !textMatches(sportGot, sportType) || !textMatches(campusGot, campusName) || !textMatches(venueGot, venueName) {
 			return
 		}
-		if !textMatches(campusGot, campusName) {
-			return
+		if venueIDStr == "" {
+			venueIDStr = trimString(obj["venueId"])
+			venueSiteIDStr = trimString(obj["id"])
+			resolvedCampus = campusGot
+			resolvedVenue = venueGot
 		}
-		if !textMatches(venueGot, venueName) {
-			return
-		}
-		venueID = trimString(obj["venueId"])
-		venueSiteID = trimString(obj["id"])
 	})
 
-	if venueID == "" || venueSiteID == "" {
+	if venueIDStr == "" || venueSiteIDStr == "" {
 		return nil, fmt.Errorf("venue not found for sport=%s campus=%s venue=%s", sportType, campusName, venueName)
 	}
 
-	// Step 2: Get day info (available slots)
+	venueIDUint := parseUint(venueIDStr)
+	venueSiteIDUint := parseUint(venueSiteIDStr)
+
+	// Step 2: 尝试从 TYYS 获取实时 dayInfo。
 	params := url.Values{}
-	params.Set("venueId", venueID)
-	params.Set("venueSiteId", venueSiteID)
-	params.Set("siteId", venueSiteID)
+	params.Set("venueId", venueIDStr)
+	params.Set("venueSiteId", venueSiteIDStr)
+	params.Set("siteId", venueSiteIDStr)
 	params.Set("date", reservationDate)
 	params.Set("reservationDate", reservationDate)
 	params.Set("searchDate", reservationDate)
 
-	dayResp, err := s.tyys.ReservationDayInfo(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("get day info: %w", err)
+	dayResp, dayErr := s.tyys.ReservationDayInfo(ctx, params)
+
+	// Step 3: 若 dayInfo 失败（预约窗口未开放），降级为 template 数据，标记 available=false。
+	if dayErr != nil || dayResp == nil {
+		return s.listSlotsFromTemplate(ctx, resolvedCampus, resolvedVenue, venueIDUint, venueSiteIDUint, nil), nil
 	}
 
-	// Step 3: Extract top-level token/weekStartDate from dayInfo (not per-slot).
+	// Step 4: 解析 dayInfo，提取顶层 token/weekStartDate。
 	var topToken, topWeekStart string
 	var topObj map[string]any
 	if unmarshalErr := json.Unmarshal(dayResp.Data, &topObj); unmarshalErr == nil {
 		topToken = trimString(topObj["token"])
 		topWeekStart = trimString(topObj["weekStartDate"])
 	}
-	venueSiteIDUint := parseUint(venueSiteID)
 
-	// Step 4: Parse slots, carrying internal IDs for use by materializeOne.
+	// Step 5: 按 slot 构建完整上下文。
 	var slots []ReservationSlotItem
 	walkSlots(dayResp.Data, func(slot map[string]any) {
+		spaceID := parseUint(trimString(slot["spaceId"]))
 		item := ReservationSlotItem{
 			SlotKey:     trimString(slot["timeId"]),
 			StartTime:   trimString(slot["startDate"]),
 			EndTime:     trimString(slot["endDate"]),
 			Available:   isSlotAvailable(slot),
+			CampusName:  resolvedCampus,
+			VenueName:   resolvedVenue,
+			VenueID:     &venueIDUint,
 			VenueSiteID: venueSiteIDUint,
-			SpaceID:     parseUint(trimString(slot["spaceId"])),
+			SpaceID:     spaceID,
 			TimeID:      parseUint(trimString(slot["timeId"])),
 			Token:       coalesce(trimString(slot["token"]), topToken),
 			WeekStart:   coalesce(trimString(slot["weekStartDate"]), topWeekStart),
@@ -309,6 +314,59 @@ func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusNam
 	})
 
 	return slots, nil
+}
+
+// listSlotsFromTemplate 在 TYYS 预约窗口未开放时，基于 template 数据返回时间段骨架。
+// 所有 slot 标记 available=false，token/week_start 为空，供前端构建计划预约的首选场次。
+// 用 tmpl.Spaces 做分场列表（不依赖 VenueInfo 层是否携带 spaceId）。
+func (s *ReservationService) listSlotsFromTemplate(ctx context.Context, campusName, venueName string, venueID, venueSiteID uint, _ map[uint]string) []ReservationSlotItem {
+	tmpl, err := s.ListTemplates(ctx, "", campusName, venueName)
+	if err != nil || tmpl == nil {
+		return nil
+	}
+
+	// 优先用 template 的 VenueID / VenueSiteID（更准确）
+	effectiveVenueID := venueID
+	effectiveVenueSiteID := venueSiteID
+	if tmpl.VenueID != nil {
+		effectiveVenueID = *tmpl.VenueID
+	}
+	if tmpl.VenueSiteID != nil {
+		effectiveVenueSiteID = *tmpl.VenueSiteID
+	}
+
+	spaces := tmpl.Spaces
+	// 若 template 没有分场信息（场馆不区分小场地），用空占位保证时间段仍能返回
+	if len(spaces) == 0 {
+		spaces = []TemplateSpace{{}}
+	}
+
+	var slots []ReservationSlotItem
+	for _, sp := range spaces {
+		sn := sp.SpaceName
+		for _, ts := range tmpl.TimeSlots {
+			vid := effectiveVenueID
+			item := ReservationSlotItem{
+				Available:   false,
+				CampusName:  campusName,
+				VenueName:   venueName,
+				VenueID:     &vid,
+				VenueSiteID: effectiveVenueSiteID,
+				SpaceID:     sp.SpaceID,
+				StartTime:   ts.StartTime,
+				EndTime:     ts.EndTime,
+			}
+			if sn != "" {
+				item.SpaceName = &sn
+			}
+			if ts.TimeID != nil {
+				item.TimeID = *ts.TimeID
+				item.SlotKey = strconv.FormatUint(uint64(*ts.TimeID), 10)
+			}
+			slots = append(slots, item)
+		}
+	}
+	return slots
 }
 
 // isSlotAvailable checks if a slot is available for booking.

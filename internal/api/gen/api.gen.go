@@ -188,22 +188,36 @@ type ReservationRecordResponse struct {
 	VenueSiteId       *int64             `json:"venue_site_id,omitempty"`
 }
 
-// ReservationSlot 预约时间段
+// ReservationSlot 预约时间段，包含提交所需的完整执行上下文
 type ReservationSlot struct {
-	// Available 是否可预约
-	Available bool `json:"available"`
+	// Available 是否可预约；预约窗口未开放时为 false
+	Available  bool    `json:"available"`
+	CampusName *string `json:"campus_name,omitempty"`
 
 	// EndTime 结束时间，格式 HH:mm 或 YYYY-MM-DD HH:mm
 	EndTime string `json:"end_time"`
 
-	// SlotKey 时间段唯一标识，用于提交预约
+	// SlotKey 时间段唯一标识
 	SlotKey string `json:"slot_key"`
+	SpaceId *int64 `json:"space_id,omitempty"`
 
-	// SpaceName 场地名称（如游泳馆免费场）
+	// SpaceName 场地名称
 	SpaceName *string `json:"space_name,omitempty"`
 
 	// StartTime 开始时间，格式 HH:mm 或 YYYY-MM-DD HH:mm
 	StartTime string `json:"start_time"`
+
+	// TimeId 时间段 ID；预约窗口未开放时可能为空
+	TimeId *int64 `json:"time_id,omitempty"`
+
+	// Token 提交预约所需 token；预约窗口未开放时为空
+	Token       *string `json:"token,omitempty"`
+	VenueId     *int64  `json:"venue_id,omitempty"`
+	VenueName   *string `json:"venue_name,omitempty"`
+	VenueSiteId *int64  `json:"venue_site_id,omitempty"`
+
+	// WeekStartDate 周起始日期；预约窗口未开放时为空
+	WeekStartDate *openapi_types.Date `json:"week_start_date,omitempty"`
 }
 
 // ReservationSlotListResponse defines model for ReservationSlotListResponse.
@@ -620,14 +634,14 @@ type ServerInterface interface {
 	// (POST /rooms/{roomId}/reject)
 	RejectJoinRequest(c *gin.Context, roomId RoomIdPath)
 	// Create a reservation plan for a future date (>2 days)
-	// (POST /rooms/{roomPublicId}/reservation/plan)
-	CreateRoomReservationPlan(c *gin.Context, roomPublicId RoomPublicIdPath)
+	// (POST /rooms/{roomId}/reservation/plan)
+	CreateRoomReservationPlan(c *gin.Context, roomId RoomPublicIdPath)
 	// Preview reservation for a room
-	// (POST /rooms/{roomPublicId}/reservation/preview)
-	PreviewRoomReservation(c *gin.Context, roomPublicId RoomPublicIdPath)
+	// (POST /rooms/{roomId}/reservation/preview)
+	PreviewRoomReservation(c *gin.Context, roomId RoomPublicIdPath)
 	// Submit reservation for a room
-	// (POST /rooms/{roomPublicId}/reservation/submit)
-	SubmitRoomReservation(c *gin.Context, roomPublicId RoomPublicIdPath)
+	// (POST /rooms/{roomId}/reservation/submit)
+	SubmitRoomReservation(c *gin.Context, roomId RoomPublicIdPath)
 	// Create a user record
 	// (POST /users)
 	CreateUser(c *gin.Context)
@@ -1351,12 +1365,12 @@ func (siw *ServerInterfaceWrapper) CreateRoomReservationPlan(c *gin.Context) {
 
 	var err error
 
-	// ------------- Path parameter "roomPublicId" -------------
-	var roomPublicId RoomPublicIdPath
+	// ------------- Path parameter "roomId" -------------
+	var roomId RoomPublicIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "roomPublicId", c.Param("roomPublicId"), &roomPublicId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
+	err = runtime.BindStyledParameterWithOptions("simple", "roomId", c.Param("roomId"), &roomId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomPublicId: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1367,7 +1381,7 @@ func (siw *ServerInterfaceWrapper) CreateRoomReservationPlan(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateRoomReservationPlan(c, roomPublicId)
+	siw.Handler.CreateRoomReservationPlan(c, roomId)
 }
 
 // PreviewRoomReservation operation middleware
@@ -1375,12 +1389,12 @@ func (siw *ServerInterfaceWrapper) PreviewRoomReservation(c *gin.Context) {
 
 	var err error
 
-	// ------------- Path parameter "roomPublicId" -------------
-	var roomPublicId RoomPublicIdPath
+	// ------------- Path parameter "roomId" -------------
+	var roomId RoomPublicIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "roomPublicId", c.Param("roomPublicId"), &roomPublicId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
+	err = runtime.BindStyledParameterWithOptions("simple", "roomId", c.Param("roomId"), &roomId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomPublicId: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1391,7 +1405,7 @@ func (siw *ServerInterfaceWrapper) PreviewRoomReservation(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PreviewRoomReservation(c, roomPublicId)
+	siw.Handler.PreviewRoomReservation(c, roomId)
 }
 
 // SubmitRoomReservation operation middleware
@@ -1399,12 +1413,12 @@ func (siw *ServerInterfaceWrapper) SubmitRoomReservation(c *gin.Context) {
 
 	var err error
 
-	// ------------- Path parameter "roomPublicId" -------------
-	var roomPublicId RoomPublicIdPath
+	// ------------- Path parameter "roomId" -------------
+	var roomId RoomPublicIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "roomPublicId", c.Param("roomPublicId"), &roomPublicId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
+	err = runtime.BindStyledParameterWithOptions("simple", "roomId", c.Param("roomId"), &roomId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomPublicId: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1415,7 +1429,7 @@ func (siw *ServerInterfaceWrapper) SubmitRoomReservation(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.SubmitRoomReservation(c, roomPublicId)
+	siw.Handler.SubmitRoomReservation(c, roomId)
 }
 
 // CreateUser operation middleware
@@ -1508,9 +1522,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/rooms/:roomId/join", wrapper.JoinRoomDirectly)
 	router.POST(options.BaseURL+"/rooms/:roomId/members/:userId/remove", wrapper.RemoveRoomMember)
 	router.POST(options.BaseURL+"/rooms/:roomId/reject", wrapper.RejectJoinRequest)
-	router.POST(options.BaseURL+"/rooms/:roomPublicId/reservation/plan", wrapper.CreateRoomReservationPlan)
-	router.POST(options.BaseURL+"/rooms/:roomPublicId/reservation/preview", wrapper.PreviewRoomReservation)
-	router.POST(options.BaseURL+"/rooms/:roomPublicId/reservation/submit", wrapper.SubmitRoomReservation)
+	router.POST(options.BaseURL+"/rooms/:roomId/reservation/plan", wrapper.CreateRoomReservationPlan)
+	router.POST(options.BaseURL+"/rooms/:roomId/reservation/preview", wrapper.PreviewRoomReservation)
+	router.POST(options.BaseURL+"/rooms/:roomId/reservation/submit", wrapper.SubmitRoomReservation)
 	router.POST(options.BaseURL+"/users", wrapper.CreateUser)
 	router.GET(options.BaseURL+"/users/:id", wrapper.GetUserById)
 }
