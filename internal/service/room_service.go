@@ -123,6 +123,10 @@ func (s *RoomService) GetByID(ctx context.Context, id uint) (*models.Room, []mod
 	return nil, nil, fmt.Errorf("room service GetByID not implemented")
 }
 
+func (s *RoomService) GetByPublicID(ctx context.Context, publicID string) (*models.Room, []models.RoomMember, error) {
+	return nil, nil, fmt.Errorf("room service GetByPublicID not implemented")
+}
+
 func (s *RoomService) Create(ctx context.Context, input CreateRoomInput) (*models.Room, error) {
 	return nil, fmt.Errorf("room service Create not implemented")
 }

@@ -26,6 +26,9 @@ type RoomReservation struct {
 	WeekStartDate     string `gorm:"size:10"`
 	BuddyCode         string `gorm:"size:32"`
 	BuddyUserIDs      string `gorm:"type:text"`
+	// PlanSlots 是用户创建远期预约计划时指定的首选场次列表（JSON array，格式为 PlanSlotSelection）。
+	// 调度器补全时依次尝试匹配；若为空或 "[]"，则接受计划所属场馆内任意可用 slot。
+	PlanSlots string `gorm:"type:text"`
 	ReservationStatus string `gorm:"size:32;not null;default:'pending';index"`
 	ScheduleStatus    string `gorm:"size:32;not null;default:'none';index"`
 	ReserveOpenAt     *time.Time

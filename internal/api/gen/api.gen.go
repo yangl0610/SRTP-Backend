@@ -107,32 +107,57 @@ type ReservationMaterializeResult struct {
 
 // ReservationPlanRequest 创建预约计划请求（仅保存预约意图，不立即调 TYYS）
 type ReservationPlanRequest struct {
-	BuddyCode       *string            `json:"buddy_code,omitempty"`
-	CampusName      string             `json:"campus_name"`
-	EndTime         string             `json:"end_time"`
-	ReservationDate openapi_types.Date `json:"reservation_date"`
-	SportType       string             `json:"sport_type"`
-	StartTime       string             `json:"start_time"`
-	VenueName       string             `json:"venue_name"`
+	BuddyCode *string `json:"buddy_code,omitempty"`
+
+	// PlanSlots 首选场次列表，campus/venue/start/end 均在每个 slot 中携带；调度器依次尝试直到一个成功
+	PlanSlots       []ReservationPlanSlotSelection `json:"plan_slots"`
+	ReservationDate openapi_types.Date             `json:"reservation_date"`
+	SportType       string                         `json:"sport_type"`
+}
+
+// ReservationPlanSlotSelection 计划路径首选场次，与 ReservationSlotSelection 相比不含需要 materialize 时才能确定的 time_id/token
+type ReservationPlanSlotSelection struct {
+	CampusName  string  `json:"campus_name"`
+	EndTime     string  `json:"end_time"`
+	SpaceId     int64   `json:"space_id"`
+	SpaceName   *string `json:"space_name,omitempty"`
+	StartTime   string  `json:"start_time"`
+	VenueId     *int64  `json:"venue_id,omitempty"`
+	VenueName   string  `json:"venue_name"`
+	VenueSiteId *int64  `json:"venue_site_id,omitempty"`
+}
+
+// ReservationPreviewItem 单个 slot 的预览结果
+type ReservationPreviewItem struct {
+	// Available 该 slot 是否通过了 TYYS orderInfo 校验
+	Available  bool   `json:"available"`
+	CampusName string `json:"campus_name"`
+	EndTime    string `json:"end_time"`
+
+	// Error 校验失败时的错误信息
+	Error         *string             `json:"error,omitempty"`
+	SpaceId       int64               `json:"space_id"`
+	SpaceName     *string             `json:"space_name,omitempty"`
+	StartTime     string              `json:"start_time"`
+	TimeId        int64               `json:"time_id"`
+	Token         string              `json:"token"`
+	VenueId       *int64              `json:"venue_id,omitempty"`
+	VenueName     string              `json:"venue_name"`
+	VenueSiteId   int64               `json:"venue_site_id"`
+	WeekStartDate *openapi_types.Date `json:"week_start_date,omitempty"`
 }
 
 // ReservationPreviewResponse defines model for ReservationPreviewResponse.
 type ReservationPreviewResponse struct {
-	BuddyCode         *string            `json:"buddy_code,omitempty"`
-	CampusName        string             `json:"campus_name"`
-	EndTime           string             `json:"end_time"`
-	Provider          string             `json:"provider"`
-	ReservationDate   openapi_types.Date `json:"reservation_date"`
-	ReservationStatus string             `json:"reservation_status"`
-	RoomId            int64              `json:"room_id"`
-	RoomPublicId      openapi_types.UUID `json:"room_public_id"`
-	SpaceId           *int64             `json:"space_id,omitempty"`
-	SpaceName         *string            `json:"space_name,omitempty"`
-	SportType         string             `json:"sport_type"`
-	StartTime         string             `json:"start_time"`
-	VenueId           *int64             `json:"venue_id,omitempty"`
-	VenueName         string             `json:"venue_name"`
-	VenueSiteId       *int64             `json:"venue_site_id,omitempty"`
+	BuddyCode       *string            `json:"buddy_code,omitempty"`
+	Provider        string             `json:"provider"`
+	ReservationDate openapi_types.Date `json:"reservation_date"`
+	RoomId          int64              `json:"room_id"`
+	RoomPublicId    openapi_types.UUID `json:"room_public_id"`
+
+	// Slots 每个候选 slot 的 TYYS orderInfo 校验结果
+	Slots     []ReservationPreviewItem `json:"slots"`
+	SportType string                   `json:"sport_type"`
 }
 
 // ReservationRecordResponse defines model for ReservationRecordResponse.
@@ -171,7 +196,7 @@ type ReservationSlot struct {
 	// SlotKey 时间段唯一标识，用于提交预约
 	SlotKey string `json:"slot_key"`
 
-	// SpaceName 场地名称（如羽毛球场1号场）
+	// SpaceName 场地名称（如游泳馆免费场）
 	SpaceName *string `json:"space_name,omitempty"`
 
 	// StartTime 开始时间，格式 HH:mm 或 YYYY-MM-DD HH:mm
@@ -183,28 +208,31 @@ type ReservationSlotListResponse struct {
 	Items []ReservationSlot `json:"items"`
 }
 
+// ReservationSlotSelection 单个候选场地时间段，由前端从 /reservations/slots 结果中选取后透传
+type ReservationSlotSelection struct {
+	CampusName string  `json:"campus_name"`
+	EndTime    string  `json:"end_time"`
+	SpaceId    int64   `json:"space_id"`
+	SpaceName  *string `json:"space_name,omitempty"`
+	StartTime  string  `json:"start_time"`
+	TimeId     int64   `json:"time_id"`
+
+	// Token TYYS slot token
+	Token         string              `json:"token"`
+	VenueId       *int64              `json:"venue_id,omitempty"`
+	VenueName     string              `json:"venue_name"`
+	VenueSiteId   int64               `json:"venue_site_id"`
+	WeekStartDate *openapi_types.Date `json:"week_start_date,omitempty"`
+}
+
 // ReservationSubmitRequest defines model for ReservationSubmitRequest.
 type ReservationSubmitRequest struct {
 	BuddyCode       *string            `json:"buddy_code,omitempty"`
-	CampusName      string             `json:"campus_name"`
-	EndTime         string             `json:"end_time"`
 	ReservationDate openapi_types.Date `json:"reservation_date"`
-	SpaceId         *int64             `json:"space_id,omitempty"`
-	SpaceName       *string            `json:"space_name,omitempty"`
-	SportType       string             `json:"sport_type"`
-	StartTime       string             `json:"start_time"`
 
-	// TimeId TYYS 时间段ID，实时预约必填
-	TimeId *int64 `json:"time_id,omitempty"`
-
-	// Token TYYS slot token，实时预约必填
-	Token       *string `json:"token,omitempty"`
-	VenueId     *int64  `json:"venue_id,omitempty"`
-	VenueName   string  `json:"venue_name"`
-	VenueSiteId *int64  `json:"venue_site_id,omitempty"`
-
-	// WeekStartDate TYYS 周起始日期，默认取 reservation_date
-	WeekStartDate *openapi_types.Date `json:"week_start_date,omitempty"`
+	// Slots 候选场地列表，campus/venue/start/end 等上下文均在每个 slot 中携带
+	Slots     []ReservationSlotSelection `json:"slots"`
+	SportType string                     `json:"sport_type"`
 }
 
 // ReservationTemplateResponse 场馆固定结构信息，用于创建预约计划时选择时间段
@@ -232,9 +260,9 @@ type ReservationTemplateTimeSlot struct {
 	TimeId       *int64 `json:"time_id,omitempty"`
 }
 
-// ReservationTriggerRequest 触发单条预约提交（供调度器调用）
+// ReservationTriggerRequest 触发单条预约提交（供调度器调用，使用 public_id 避免整数枚举越权风险）
 type ReservationTriggerRequest struct {
-	ReservationId int64 `json:"reservation_id"`
+	ReservationPublicId openapi_types.UUID `json:"reservation_public_id"`
 }
 
 // ReservationVenue 场馆信息
@@ -359,15 +387,18 @@ type UpdateRoomRequest struct {
 
 // User defines model for User.
 type User struct {
-	AuthUid       string    `json:"auth_uid"`
-	AvatarUrl     string    `json:"avatar_url"`
-	Bio           string    `json:"bio"`
-	CreatedAt     time.Time `json:"created_at"`
-	Gender        string    `json:"gender"`
-	Id            int64     `json:"id"`
-	Nickname      string    `json:"nickname"`
-	ProfileStatus string    `json:"profile_status"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	AuthUid   string    `json:"auth_uid"`
+	AvatarUrl string    `json:"avatar_url"`
+	Bio       string    `json:"bio"`
+	CreatedAt time.Time `json:"created_at"`
+	Gender    string    `json:"gender"`
+	Id        int64     `json:"id"`
+	Nickname  string    `json:"nickname"`
+
+	// ProfileStatus Current profile state. This version uses synchronous blocked-word validation instead of manual review workflow.
+	ProfileStatus string             `json:"profile_status"`
+	PublicId      openapi_types.UUID `json:"public_id"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
 // UserResponse defines model for UserResponse.
@@ -397,6 +428,9 @@ type PageSizeQuery = int32
 
 // RoomIdPath defines model for RoomIdPath.
 type RoomIdPath = int64
+
+// RoomPublicIdPath defines model for RoomPublicIdPath.
+type RoomPublicIdPath = openapi_types.UUID
 
 // UserIdPath defines model for UserIdPath.
 type UserIdPath = int64
@@ -583,14 +617,14 @@ type ServerInterface interface {
 	// (POST /rooms/{roomId}/reject)
 	RejectJoinRequest(c *gin.Context, roomId RoomIdPath)
 	// Create a reservation plan for a future date (>2 days)
-	// (POST /rooms/{roomId}/reservation/plan)
-	CreateRoomReservationPlan(c *gin.Context, roomId RoomIdPath)
+	// (POST /rooms/{roomPublicId}/reservation/plan)
+	CreateRoomReservationPlan(c *gin.Context, roomPublicId RoomPublicIdPath)
 	// Preview reservation for a room
-	// (POST /rooms/{roomId}/reservation/preview)
-	PreviewRoomReservation(c *gin.Context, roomId RoomIdPath)
+	// (POST /rooms/{roomPublicId}/reservation/preview)
+	PreviewRoomReservation(c *gin.Context, roomPublicId RoomPublicIdPath)
 	// Submit reservation for a room
-	// (POST /rooms/{roomId}/reservation/submit)
-	SubmitRoomReservation(c *gin.Context, roomId RoomIdPath)
+	// (POST /rooms/{roomPublicId}/reservation/submit)
+	SubmitRoomReservation(c *gin.Context, roomPublicId RoomPublicIdPath)
 	// Create a user record
 	// (POST /users)
 	CreateUser(c *gin.Context)
@@ -1314,12 +1348,12 @@ func (siw *ServerInterfaceWrapper) CreateRoomReservationPlan(c *gin.Context) {
 
 	var err error
 
-	// ------------- Path parameter "roomId" -------------
-	var roomId RoomIdPath
+	// ------------- Path parameter "roomPublicId" -------------
+	var roomPublicId RoomPublicIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "roomId", c.Param("roomId"), &roomId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "integer", Format: "int64"})
+	err = runtime.BindStyledParameterWithOptions("simple", "roomPublicId", c.Param("roomPublicId"), &roomPublicId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomId: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomPublicId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1330,7 +1364,7 @@ func (siw *ServerInterfaceWrapper) CreateRoomReservationPlan(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateRoomReservationPlan(c, roomId)
+	siw.Handler.CreateRoomReservationPlan(c, roomPublicId)
 }
 
 // PreviewRoomReservation operation middleware
@@ -1338,12 +1372,12 @@ func (siw *ServerInterfaceWrapper) PreviewRoomReservation(c *gin.Context) {
 
 	var err error
 
-	// ------------- Path parameter "roomId" -------------
-	var roomId RoomIdPath
+	// ------------- Path parameter "roomPublicId" -------------
+	var roomPublicId RoomPublicIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "roomId", c.Param("roomId"), &roomId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "integer", Format: "int64"})
+	err = runtime.BindStyledParameterWithOptions("simple", "roomPublicId", c.Param("roomPublicId"), &roomPublicId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomId: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomPublicId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1354,7 +1388,7 @@ func (siw *ServerInterfaceWrapper) PreviewRoomReservation(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PreviewRoomReservation(c, roomId)
+	siw.Handler.PreviewRoomReservation(c, roomPublicId)
 }
 
 // SubmitRoomReservation operation middleware
@@ -1362,12 +1396,12 @@ func (siw *ServerInterfaceWrapper) SubmitRoomReservation(c *gin.Context) {
 
 	var err error
 
-	// ------------- Path parameter "roomId" -------------
-	var roomId RoomIdPath
+	// ------------- Path parameter "roomPublicId" -------------
+	var roomPublicId RoomPublicIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "roomId", c.Param("roomId"), &roomId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "integer", Format: "int64"})
+	err = runtime.BindStyledParameterWithOptions("simple", "roomPublicId", c.Param("roomPublicId"), &roomPublicId, runtime.BindStyledParameterOptions{Explode: false, Required: true, Type: "string", Format: "uuid"})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomId: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter roomPublicId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1378,7 +1412,7 @@ func (siw *ServerInterfaceWrapper) SubmitRoomReservation(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.SubmitRoomReservation(c, roomId)
+	siw.Handler.SubmitRoomReservation(c, roomPublicId)
 }
 
 // CreateUser operation middleware
@@ -1471,9 +1505,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/rooms/:roomId/join", wrapper.JoinRoomDirectly)
 	router.POST(options.BaseURL+"/rooms/:roomId/members/:userId/remove", wrapper.RemoveRoomMember)
 	router.POST(options.BaseURL+"/rooms/:roomId/reject", wrapper.RejectJoinRequest)
-	router.POST(options.BaseURL+"/rooms/:roomId/reservation/plan", wrapper.CreateRoomReservationPlan)
-	router.POST(options.BaseURL+"/rooms/:roomId/reservation/preview", wrapper.PreviewRoomReservation)
-	router.POST(options.BaseURL+"/rooms/:roomId/reservation/submit", wrapper.SubmitRoomReservation)
+	router.POST(options.BaseURL+"/rooms/:roomPublicId/reservation/plan", wrapper.CreateRoomReservationPlan)
+	router.POST(options.BaseURL+"/rooms/:roomPublicId/reservation/preview", wrapper.PreviewRoomReservation)
+	router.POST(options.BaseURL+"/rooms/:roomPublicId/reservation/submit", wrapper.SubmitRoomReservation)
 	router.POST(options.BaseURL+"/users", wrapper.CreateUser)
 	router.GET(options.BaseURL+"/users/:id", wrapper.GetUserById)
 }

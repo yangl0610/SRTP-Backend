@@ -560,12 +560,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /rooms/{roomId}/reservation/preview:
+  /rooms/{roomPublicId}/reservation/preview:
     post:
       operationId: previewRoomReservation
       summary: Preview reservation for a room
       parameters:
-        - $ref: '#/components/parameters/RoomIdPath'
+        - $ref: '#/components/parameters/RoomPublicIdPath'
       requestBody:
         required: true
         content:
@@ -585,12 +585,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /rooms/{roomId}/reservation/submit:
+  /rooms/{roomPublicId}/reservation/submit:
     post:
       operationId: submitRoomReservation
       summary: Submit reservation for a room
       parameters:
-        - $ref: '#/components/parameters/RoomIdPath'
+        - $ref: '#/components/parameters/RoomPublicIdPath'
       requestBody:
         required: true
         content:
@@ -646,15 +646,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /rooms/{roomId}/reservation/plan:
+  /rooms/{roomPublicId}/reservation/plan:
     post:
       operationId: createRoomReservationPlan
       summary: Create a reservation plan for a future date (>2 days)
       description: |
         为 2 天后的日期创建预约计划，保存预约意图到数据库。
-        系统会在预约日期前 2 天的上午 09:00 自动补全 slot 上下文并提交 TYYS。
+        系统会在预约日期前 2 天的相应时间 自动补全 slot 上下文并提交 TYYS。
       parameters:
-        - $ref: '#/components/parameters/RoomIdPath'
+        - $ref: '#/components/parameters/RoomPublicIdPath'
       requestBody:
         required: true
         content:
@@ -744,6 +744,13 @@ components:
         type: integer
         format: int64
         minimum: 1
+    RoomPublicIdPath:
+      in: path
+      name: roomPublicId
+      required: true
+      schema:
+        type: string
+        format: uuid
     MemberUserIdPath:
       in: path
       name: userId
@@ -1261,7 +1268,7 @@ components:
           description: 是否可预约
         space_name:
           type: string
-          description: 场地名称（如羽毛球场1号场）
+          description: 场地名称（如游泳馆免费场）
     ReservationSlotListResponse:
       type: object
       required: [items]
@@ -1270,30 +1277,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReservationSlot'
-    ReservationSubmitRequest:
+    ReservationSlotSelection:
       type: object
-      required:
-        - sport_type
-        - campus_name
-        - venue_name
-        - reservation_date
-        - start_time
-        - end_time
+      required: [campus_name, venue_name, venue_site_id, space_id, start_time, end_time, time_id, token]
+      description: 单个候选场地时间段，由前端从 /reservations/slots 结果中选取后透传
       properties:
-        sport_type:
-          type: string
         campus_name:
           type: string
         venue_name:
-          type: string
-        reservation_date:
-          type: string
-          format: date
-        start_time:
-          type: string
-        end_time:
-          type: string
-        buddy_code:
           type: string
         venue_id:
           type: integer
@@ -1306,30 +1297,85 @@ components:
           format: int64
         space_name:
           type: string
+        start_time:
+          type: string
+        end_time:
+          type: string
         time_id:
           type: integer
           format: int64
-          description: TYYS 时间段ID，实时预约必填
         token:
           type: string
-          description: TYYS slot token，实时预约必填
+          description: TYYS slot token
         week_start_date:
           type: string
           format: date
-          description: TYYS 周起始日期，默认取 reservation_date
+    ReservationSubmitRequest:
+      type: object
+      required:
+        - sport_type
+        - reservation_date
+        - slots
+      properties:
+        sport_type:
+          type: string
+        reservation_date:
+          type: string
+          format: date
+        buddy_code:
+          type: string
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationSlotSelection'
+          description: 候选场地列表，campus/venue/start/end 等上下文均在每个 slot 中携带
+    ReservationPreviewItem:
+      type: object
+      required: [campus_name, venue_name, venue_site_id, space_id, start_time, end_time, time_id, token, available]
+      description: 单个 slot 的预览结果
+      properties:
+        campus_name:
+          type: string
+        venue_name:
+          type: string
+        venue_id:
+          type: integer
+          format: int64
+        venue_site_id:
+          type: integer
+          format: int64
+        space_id:
+          type: integer
+          format: int64
+        space_name:
+          type: string
+        start_time:
+          type: string
+        end_time:
+          type: string
+        time_id:
+          type: integer
+          format: int64
+        token:
+          type: string
+        week_start_date:
+          type: string
+          format: date
+        available:
+          type: boolean
+          description: 该 slot 是否通过了 TYYS orderInfo 校验
+        error:
+          type: string
+          description: 校验失败时的错误信息
     ReservationPreviewResponse:
       type: object
       required:
         - room_id
         - room_public_id
         - provider
-        - reservation_status
         - sport_type
-        - campus_name
-        - venue_name
         - reservation_date
-        - start_time
-        - end_time
+        - slots
       properties:
         room_id:
           type: integer
@@ -1339,34 +1385,18 @@ components:
           format: uuid
         provider:
           type: string
-        reservation_status:
-          type: string
         sport_type:
-          type: string
-        campus_name:
-          type: string
-        venue_name:
           type: string
         reservation_date:
           type: string
           format: date
-        start_time:
-          type: string
-        end_time:
-          type: string
         buddy_code:
           type: string
-        venue_id:
-          type: integer
-          format: int64
-        venue_site_id:
-          type: integer
-          format: int64
-        space_id:
-          type: integer
-          format: int64
-        space_name:
-          type: string
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationPreviewItem'
+          description: 每个候选 slot 的 TYYS orderInfo 校验结果
     ReservationRecordResponse:
       type: object
       required:
@@ -1487,42 +1517,58 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReservationTemplateTimeSlot'
-    ReservationPlanRequest:
+    ReservationPlanSlotSelection:
       type: object
-      required:
-        - sport_type
-        - campus_name
-        - venue_name
-        - reservation_date
-        - start_time
-        - end_time
-      description: 创建预约计划请求（仅保存预约意图，不立即调 TYYS）
+      required: [campus_name, venue_name, space_id, start_time, end_time]
+      description: 计划路径首选场次，与 ReservationSlotSelection 相比不含需要 materialize 时才能确定的 time_id/token
       properties:
-        sport_type:
-          type: string
         campus_name:
           type: string
         venue_name:
           type: string
+        venue_id:
+          type: integer
+          format: int64
+        venue_site_id:
+          type: integer
+          format: int64
+        space_id:
+          type: integer
+          format: int64
+        space_name:
+          type: string
+        start_time:
+          type: string
+        end_time:
+          type: string
+    ReservationPlanRequest:
+      type: object
+      required:
+        - sport_type
+        - reservation_date
+        - plan_slots
+      description: 创建预约计划请求（仅保存预约意图，不立即调 TYYS）
+      properties:
+        sport_type:
+          type: string
         reservation_date:
           type: string
           format: date
-        start_time:
-          type: string
-          example: "08:00"
-        end_time:
-          type: string
-          example: "09:00"
         buddy_code:
           type: string
+        plan_slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationPlanSlotSelection'
+          description: 选中场次列表，campus/venue/start/end 均在每个 slot 中携带；调度器依次尝试直到一个成功
     ReservationTriggerRequest:
       type: object
-      required: [reservation_id]
-      description: 触发单条预约提交（供调度器调用）
+      required: [reservation_public_id]
+      description: 触发单条预约提交（供调度器调用，使用 public_id 避免整数枚举越权风险）
       properties:
-        reservation_id:
-          type: integer
-          format: int64
+        reservation_public_id:
+          type: string
+          format: uuid
     ReservationMaterializeRequest:
       type: object
       description: |
