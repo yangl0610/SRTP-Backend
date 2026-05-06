@@ -53,17 +53,16 @@ type SlotSelection struct {
 	WeekStart   string
 }
 
-// TemplateSpace 是场馆固定分场信息。
-type TemplateSpace struct {
-	SpaceID   uint
-	SpaceName string
-}
-
-// TemplateTimeSlot 是场馆固定时间段模板。
-type TemplateTimeSlot struct {
-	TimeID       *uint
-	StartTime    string
-	EndTime      string
+// TemplateSlot 是场馆固定场次（space × timeslot），不含实时的 TimeID/Token。
+type TemplateSlot struct {
+	SpaceID     uint
+	SpaceName   string
+	VenueID     *uint
+	VenueSiteID uint
+	CampusName  string
+	VenueName   string
+	StartTime   string
+	EndTime     string
 	DisplayLabel string
 }
 
@@ -74,8 +73,7 @@ type ReservationTemplateOutput struct {
 	VenueName   string
 	VenueID     *uint
 	VenueSiteID *uint
-	Spaces      []TemplateSpace
-	TimeSlots   []TemplateTimeSlot
+	Slots       []TemplateSlot
 }
 
 type ReservationPreviewInput struct {
@@ -317,54 +315,37 @@ func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusNam
 }
 
 // listSlotsFromTemplate 在 TYYS 预约窗口未开放时，基于 template 数据返回时间段骨架。
-// 所有 slot 标记 available=false，token/week_start 为空，供前端构建计划预约的首选场次。
-// 用 tmpl.Spaces 做分场列表（不依赖 VenueInfo 层是否携带 spaceId）。
+// 所有 slot 标记 available=false，token/time_id 为空，供前端构建计划预约的首选场次。
 func (s *ReservationService) listSlotsFromTemplate(ctx context.Context, campusName, venueName string, venueID, venueSiteID uint, _ map[uint]string) []ReservationSlotItem {
 	tmpl, err := s.ListTemplates(ctx, "", campusName, venueName)
 	if err != nil || tmpl == nil {
 		return nil
 	}
-
-	// 优先用 template 的 VenueID / VenueSiteID（更准确）
-	effectiveVenueID := venueID
-	effectiveVenueSiteID := venueSiteID
-	if tmpl.VenueID != nil {
-		effectiveVenueID = *tmpl.VenueID
-	}
-	if tmpl.VenueSiteID != nil {
-		effectiveVenueSiteID = *tmpl.VenueSiteID
-	}
-
-	spaces := tmpl.Spaces
-	// 若 template 没有分场信息（场馆不区分小场地），用空占位保证时间段仍能返回
-	if len(spaces) == 0 {
-		spaces = []TemplateSpace{{}}
-	}
-
 	var slots []ReservationSlotItem
-	for _, sp := range spaces {
-		sn := sp.SpaceName
-		for _, ts := range tmpl.TimeSlots {
-			vid := effectiveVenueID
-			item := ReservationSlotItem{
-				Available:   false,
-				CampusName:  campusName,
-				VenueName:   venueName,
-				VenueID:     &vid,
-				VenueSiteID: effectiveVenueSiteID,
-				SpaceID:     sp.SpaceID,
-				StartTime:   ts.StartTime,
-				EndTime:     ts.EndTime,
-			}
-			if sn != "" {
-				item.SpaceName = &sn
-			}
-			if ts.TimeID != nil {
-				item.TimeID = *ts.TimeID
-				item.SlotKey = strconv.FormatUint(uint64(*ts.TimeID), 10)
-			}
-			slots = append(slots, item)
+	for _, ts := range tmpl.Slots {
+		vid := venueID
+		if ts.VenueID != nil {
+			vid = *ts.VenueID
 		}
+		sid := venueSiteID
+		if ts.VenueSiteID != 0 {
+			sid = ts.VenueSiteID
+		}
+		item := ReservationSlotItem{
+			Available:   false,
+			CampusName:  ts.CampusName,
+			VenueName:   ts.VenueName,
+			VenueID:     &vid,
+			VenueSiteID: sid,
+			SpaceID:     ts.SpaceID,
+			StartTime:   ts.StartTime,
+			EndTime:     ts.EndTime,
+		}
+		if ts.SpaceName != "" {
+			sn := ts.SpaceName
+			item.SpaceName = &sn
+		}
+		slots = append(slots, item)
 	}
 	return slots
 }
@@ -475,12 +456,79 @@ func reserveOpenAt(reservationDate, campusName, sportType string) (time.Time, er
 	return time.Date(openDate.Year(), openDate.Month(), openDate.Day(), hour, 0, 0, 0, loc), nil
 }
 
-// ListTemplates 查询场馆固定结构信息（分场列表和时间段模板）。
-// 先用 VenueInfo 取分场，再尝试用明日的 dayInfo 取时间段模板；dayInfo 失败时只返回分场。
-func (s *ReservationService) ListTemplates(ctx context.Context, sportType, campusName, venueName string) (*ReservationTemplateOutput, error) {
-	venueResp, err := s.tyys.VenueInfo(ctx, 0)
+// ReservationSubmitOrPlanResult 是 SubmitOrPlan 的返回值，标明实际走了哪条路径。
+type ReservationSubmitOrPlanResult struct {
+	Record  *models.RoomReservation
+	Planned bool // true=创建了计划，false=直接提交
+}
+
+// SubmitOrPlan 统一预约入口：对开放窗口内的 slot 依次尝试实时提交，全部失败（或无窗口内 slot）时降级为创建远期计划。
+// 入参统一使用 ReservationPreviewInput；计划路径内部自动将 SlotSelection 降级为 PlanSlotSelection。
+func (s *ReservationService) SubmitOrPlan(ctx context.Context, input ReservationPreviewInput) (*ReservationSubmitOrPlanResult, error) {
+	if len(input.Slots) == 0 {
+		return nil, fmt.Errorf("submit or plan requires at least one slot selection")
+	}
+
+	now := time.Now()
+	var openSlots []SlotSelection
+	for _, slot := range input.Slots {
+		openAt, err := reserveOpenAt(input.ReservationDate, slot.CampusName, input.SportType)
+		if err != nil {
+			continue
+		}
+		if !now.Before(openAt) {
+			openSlots = append(openSlots, slot)
+		}
+	}
+
+	if len(openSlots) > 0 {
+		record, err := s.Submit(ctx, ReservationPreviewInput{
+			RoomID:          input.RoomID,
+			SportType:       input.SportType,
+			ReservationDate: input.ReservationDate,
+			BuddyCode:       input.BuddyCode,
+			Slots:           openSlots,
+		})
+		if err == nil && record.ReservationStatus == "success" {
+			return &ReservationSubmitOrPlanResult{Record: record, Planned: false}, nil
+		}
+	}
+
+	// 无开放窗口内的 slot，或全部提交失败，降级为计划
+	planSlots := make([]PlanSlotSelection, 0, len(input.Slots))
+	for _, s := range input.Slots {
+		siteID := s.VenueSiteID
+		planSlots = append(planSlots, PlanSlotSelection{
+			CampusName:  s.CampusName,
+			VenueName:   s.VenueName,
+			VenueID:     s.VenueID,
+			VenueSiteID: &siteID,
+			SpaceID:     s.SpaceID,
+			SpaceName:   s.SpaceName,
+			StartTime:   s.StartTime,
+			EndTime:     s.EndTime,
+		})
+	}
+	record, err := s.CreatePlan(ctx, ReservationPlanInput{
+		RoomID:          input.RoomID,
+		SportType:       input.SportType,
+		ReservationDate: input.ReservationDate,
+		BuddyCode:       input.BuddyCode,
+		PlanSlots:       planSlots,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("get venue info: %w", err)
+		return nil, err
+	}
+	return &ReservationSubmitOrPlanResult{Record: record, Planned: true}, nil
+}
+
+// ListTemplates 查询场馆固定场次列表，不含实时的 TimeID/Token。
+// 用明日日期调 ListSlots，剥离实时字段后返回。
+func (s *ReservationService) ListTemplates(ctx context.Context, sportType, campusName, venueName string) (*ReservationTemplateOutput, error) {
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	items, err := s.ListSlots(ctx, sportType, campusName, venueName, tomorrow)
+	if err != nil {
+		return nil, err
 	}
 
 	out := &ReservationTemplateOutput{
@@ -488,74 +536,28 @@ func (s *ReservationService) ListTemplates(ctx context.Context, sportType, campu
 		CampusName: campusName,
 		VenueName:  venueName,
 	}
-
-	spaceSet := map[uint]string{}
-	walkVenues(venueResp.Data, func(obj map[string]any) {
-		if !textMatches(trimString(obj["sportName"]), sportType) {
-			return
+	if len(items) > 0 {
+		out.CampusName = items[0].CampusName
+		out.VenueName = items[0].VenueName
+		out.VenueID = items[0].VenueID
+		if items[0].VenueSiteID != 0 {
+			v := items[0].VenueSiteID
+			out.VenueSiteID = &v
 		}
-		if !textMatches(trimString(obj["campusName"]), campusName) {
-			return
-		}
-		if !textMatches(trimString(obj["venueName"]), venueName) {
-			return
-		}
-		if out.VenueID == nil {
-			if vid := trimString(obj["venueId"]); vid != "" {
-				v := parseUint(vid)
-				out.VenueID = &v
-			}
-		}
-		if out.VenueSiteID == nil {
-			if sid := trimString(obj["id"]); sid != "" {
-				v := parseUint(sid)
-				out.VenueSiteID = &v
-			}
-		}
-		if spaceID := trimString(obj["spaceId"]); spaceID != "" {
-			id := parseUint(spaceID)
-			spaceSet[id] = trimString(obj["spaceName"])
-		}
-	})
-
-	for id, name := range spaceSet {
-		out.Spaces = append(out.Spaces, TemplateSpace{SpaceID: id, SpaceName: name})
 	}
 
-	// 尝试从明日的 dayInfo 取时间段模板；失败不影响主结果。
-	if out.VenueID != nil && out.VenueSiteID != nil {
-		tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
-		params := url.Values{}
-		params.Set("venueId", strconv.FormatUint(uint64(*out.VenueID), 10))
-		params.Set("venueSiteId", strconv.FormatUint(uint64(*out.VenueSiteID), 10))
-		params.Set("siteId", strconv.FormatUint(uint64(*out.VenueSiteID), 10))
-		params.Set("date", tomorrow)
-		params.Set("reservationDate", tomorrow)
-		params.Set("searchDate", tomorrow)
-		if dayResp, dayErr := s.tyys.ReservationDayInfo(ctx, params); dayErr == nil {
-			slotSet := map[string]TemplateTimeSlot{}
-			walkSlots(dayResp.Data, func(slot map[string]any) {
-				start := trimString(slot["startDate"])
-				end := trimString(slot["endDate"])
-				key := start + "|" + end
-				if _, exists := slotSet[key]; exists {
-					return
-				}
-				ts := TemplateTimeSlot{
-					StartTime:    formatTimeOnly(start),
-					EndTime:      formatTimeOnly(end),
-					DisplayLabel: formatTimeOnly(start) + "-" + formatTimeOnly(end),
-				}
-				if tid := trimString(slot["timeId"]); tid != "" {
-					v := parseUint(tid)
-					ts.TimeID = &v
-				}
-				slotSet[key] = ts
-			})
-			for _, ts := range slotSet {
-				out.TimeSlots = append(out.TimeSlots, ts)
-			}
-		}
+	for _, item := range items {
+		out.Slots = append(out.Slots, TemplateSlot{
+			SpaceID:      item.SpaceID,
+			SpaceName:    stringVal(item.SpaceName),
+			VenueID:      item.VenueID,
+			VenueSiteID:  item.VenueSiteID,
+			CampusName:   item.CampusName,
+			VenueName:    item.VenueName,
+			StartTime:    formatTimeOnly(item.StartTime),
+			EndTime:      formatTimeOnly(item.EndTime),
+			DisplayLabel: formatTimeOnly(item.StartTime) + "-" + formatTimeOnly(item.EndTime),
+		})
 	}
 
 	return out, nil
@@ -612,7 +614,17 @@ func (s *ReservationService) Preview(ctx context.Context, input ReservationPrevi
 		BuddyCode:       input.BuddyCode,
 	}
 
+	now := time.Now()
 	for _, slot := range input.Slots {
+		openAt, err := reserveOpenAt(input.ReservationDate, slot.CampusName, input.SportType)
+		if err == nil && now.Before(openAt) {
+			out.Slots = append(out.Slots, SlotPreviewItem{
+				Slot:      slot,
+				Available: false,
+				Error:     fmt.Sprintf("reservation window not open until %s", openAt.Format("2006-01-02 15:04")),
+			})
+			continue
+		}
 		form := url.Values{}
 		form.Set("venueSiteId", strconv.FormatUint(uint64(slot.VenueSiteID), 10))
 		form.Set("reservationDate", input.ReservationDate)
@@ -623,10 +635,10 @@ func (s *ReservationService) Preview(ctx context.Context, input ReservationPrevi
 			"timeId":            strconv.FormatUint(uint64(slot.TimeID), 10),
 			"venueSpaceGroupId": nil,
 		}}))
-		_, err := s.tyys.ReservationOrderInfo(ctx, form)
-		item := SlotPreviewItem{Slot: slot, Available: err == nil}
-		if err != nil {
-			item.Error = err.Error()
+		_, tyysErr := s.tyys.ReservationOrderInfo(ctx, form)
+		item := SlotPreviewItem{Slot: slot, Available: tyysErr == nil}
+		if tyysErr != nil {
+			item.Error = tyysErr.Error()
 		}
 		out.Slots = append(out.Slots, item)
 	}
@@ -733,31 +745,44 @@ func (s *ReservationService) resolvePreferredSlots(ctx context.Context, plan *mo
 		if err != nil {
 			continue // 该场馆暂不可查，跳过
 		}
-		spaceMap := make(map[uint]PlanSlotSelection, len(group))
+		// 同一 space 可能有多个时段，用 []PlanSlotSelection 保留全部意图
+		spaceMap := make(map[uint][]PlanSlotSelection, len(group))
 		for _, ps := range group {
-			spaceMap[ps.SpaceID] = ps
+			spaceMap[ps.SpaceID] = append(spaceMap[ps.SpaceID], ps)
 		}
 		for _, live := range liveSlots {
 			if !live.Available {
 				continue
 			}
-			ps, ok := spaceMap[live.SpaceID]
+			preferred, ok := spaceMap[live.SpaceID]
 			if !ok {
 				continue
 			}
-			candidates = append(candidates, SlotSelection{
-				CampusName:  key.campus,
-				VenueName:   key.venue,
-				VenueID:     ps.VenueID,
-				VenueSiteID: live.VenueSiteID,
-				SpaceID:     live.SpaceID,
-				SpaceName:   live.SpaceName,
-				StartTime:   live.StartTime,
-				EndTime:     live.EndTime,
-				TimeID:      live.TimeID,
-				Token:       live.Token,
-				WeekStart:   live.WeekStart,
-			})
+			// 按时间段匹配：live slot 的 start/end 必须与某条意图一致
+			for _, ps := range preferred {
+				wantStart := formatTimeOnly(ps.StartTime)
+				wantEnd := formatTimeOnly(ps.EndTime)
+				if wantStart != "" && wantStart != formatTimeOnly(live.StartTime) {
+					continue
+				}
+				if wantEnd != "" && wantEnd != formatTimeOnly(live.EndTime) {
+					continue
+				}
+				candidates = append(candidates, SlotSelection{
+					CampusName:  key.campus,
+					VenueName:   key.venue,
+					VenueID:     ps.VenueID,
+					VenueSiteID: live.VenueSiteID,
+					SpaceID:     live.SpaceID,
+					SpaceName:   live.SpaceName,
+					StartTime:   live.StartTime,
+					EndTime:     live.EndTime,
+					TimeID:      live.TimeID,
+					Token:       live.Token,
+					WeekStart:   live.WeekStart,
+				})
+				break // 一条 live slot 匹配一条意图即可
+			}
 		}
 	}
 	return candidates, nil

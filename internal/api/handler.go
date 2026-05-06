@@ -444,12 +444,12 @@ func (h *Handler) SubmitRoomReservation(c *gin.Context, roomId gen.RoomPublicIdP
 		response.Error(c, http.StatusNotFound, "room not found")
 		return
 	}
-	reservation, err := h.reservationService.Submit(c.Request.Context(), buildReservationPreviewInput(room.ID, req))
+	result, err := h.reservationService.SubmitOrPlan(c.Request.Context(), buildReservationPreviewInput(room.ID, req))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.JSON(c, http.StatusOK, buildReservationRecordResponse(reservation, room.PublicID))
+	response.JSON(c, http.StatusOK, buildReservationRecordResponse(result.Record, room.PublicID))
 }
 
 func (h *Handler) ListReservationTemplates(c *gin.Context, params gen.ListReservationTemplatesParams) {
@@ -458,25 +458,38 @@ func (h *Handler) ListReservationTemplates(c *gin.Context, params gen.ListReserv
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	spaces := make([]gen.ReservationTemplateSpace, 0, len(out.Spaces))
-	for _, sp := range out.Spaces {
-		spaces = append(spaces, gen.ReservationTemplateSpace{SpaceId: uint64ToInt64(sp.SpaceID), SpaceName: sp.SpaceName})
+	slots := make([]gen.ReservationTemplateSlot, 0, len(out.Slots))
+	for _, ts := range out.Slots {
+		s := gen.ReservationTemplateSlot{
+			SpaceId:      uint64ToInt64(ts.SpaceID),
+			SpaceName:    ts.SpaceName,
+			CampusName:   stringPtr(ts.CampusName),
+			VenueName:    stringPtr(ts.VenueName),
+			StartTime:    ts.StartTime,
+			EndTime:      ts.EndTime,
+			DisplayLabel: ts.DisplayLabel,
+		}
+		if ts.VenueID != nil {
+			v := int64(*ts.VenueID)
+			s.VenueId = &v
+		}
+		if ts.VenueSiteID != 0 {
+			v := int64(ts.VenueSiteID)
+			s.VenueSiteId = &v
+		}
+		slots = append(slots, s)
 	}
-	timeSlots := make([]gen.ReservationTemplateTimeSlot, 0, len(out.TimeSlots))
-	for _, ts := range out.TimeSlots {
-		timeSlots = append(timeSlots, gen.ReservationTemplateTimeSlot{
-			TimeId:    uintPtrToInt64Ptr(ts.TimeID),
-			StartTime: ts.StartTime,
-			EndTime:   ts.EndTime,
-		})
+	venueSiteID := int64(0)
+	if out.VenueSiteID != nil {
+		venueSiteID = int64(*out.VenueSiteID)
 	}
 	response.JSON(c, http.StatusOK, gen.ReservationTemplateResponse{
-		SportType:  out.SportType,
-		CampusName: out.CampusName,
-		VenueName:  out.VenueName,
-		VenueId:    uintPtrToInt64Ptr(out.VenueID),
-		Spaces:     spaces,
-		TimeSlots:  timeSlots,
+		SportType:   out.SportType,
+		CampusName:  out.CampusName,
+		VenueName:   out.VenueName,
+		VenueId:     uintPtrToInt64Ptr(out.VenueID),
+		VenueSiteId: venueSiteID,
+		Slots:       slots,
 	})
 }
 

@@ -254,27 +254,27 @@ type ReservationSubmitRequest struct {
 
 // ReservationTemplateResponse 场馆固定结构信息，用于创建预约计划时选择时间段
 type ReservationTemplateResponse struct {
-	CampusName  string                        `json:"campus_name"`
-	Spaces      []ReservationTemplateSpace    `json:"spaces"`
-	SportType   string                        `json:"sport_type"`
-	TimeSlots   []ReservationTemplateTimeSlot `json:"time_slots"`
-	VenueId     *int64                        `json:"venue_id,omitempty"`
-	VenueName   string                        `json:"venue_name"`
-	VenueSiteId int64                         `json:"venue_site_id"`
+	CampusName string `json:"campus_name"`
+
+	// Slots 所有可选场次（space × timeslot 笛卡尔积），不含实时的 time_id/token
+	Slots       []ReservationTemplateSlot `json:"slots"`
+	SportType   string                    `json:"sport_type"`
+	VenueId     *int64                    `json:"venue_id,omitempty"`
+	VenueName   string                    `json:"venue_name"`
+	VenueSiteId int64                     `json:"venue_site_id"`
 }
 
-// ReservationTemplateSpace defines model for ReservationTemplateSpace.
-type ReservationTemplateSpace struct {
-	SpaceId   int64  `json:"space_id"`
-	SpaceName string `json:"space_name"`
-}
-
-// ReservationTemplateTimeSlot defines model for ReservationTemplateTimeSlot.
-type ReservationTemplateTimeSlot struct {
-	DisplayLabel string `json:"display_label"`
-	EndTime      string `json:"end_time"`
-	StartTime    string `json:"start_time"`
-	TimeId       *int64 `json:"time_id,omitempty"`
+// ReservationTemplateSlot 场馆固定场次（space × timeslot），不含实时的 time_id/token
+type ReservationTemplateSlot struct {
+	CampusName   *string `json:"campus_name,omitempty"`
+	DisplayLabel string  `json:"display_label"`
+	EndTime      string  `json:"end_time"`
+	SpaceId      int64   `json:"space_id"`
+	SpaceName    string  `json:"space_name"`
+	StartTime    string  `json:"start_time"`
+	VenueId      *int64  `json:"venue_id,omitempty"`
+	VenueName    *string `json:"venue_name,omitempty"`
+	VenueSiteId  *int64  `json:"venue_site_id,omitempty"`
 }
 
 // ReservationTriggerRequest 触发单条预约提交（供调度器调用，使用 public_id 避免整数枚举越权风险）

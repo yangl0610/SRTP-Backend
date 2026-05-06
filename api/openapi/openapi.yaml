@@ -1491,22 +1491,26 @@ components:
         updated_at:
           type: string
           format: date-time
-    ReservationTemplateSpace:
+    ReservationTemplateSlot:
       type: object
-      required: [space_id, space_name]
+      required: [space_id, space_name, start_time, end_time, display_label]
+      description: 场馆固定场次（space × timeslot），不含实时的 time_id/token
       properties:
         space_id:
           type: integer
           format: int64
         space_name:
           type: string
-    ReservationTemplateTimeSlot:
-      type: object
-      required: [start_time, end_time, display_label]
-      properties:
-        time_id:
+        venue_id:
           type: integer
           format: int64
+        venue_site_id:
+          type: integer
+          format: int64
+        campus_name:
+          type: string
+        venue_name:
+          type: string
         start_time:
           type: string
           example: "08:00"
@@ -1518,7 +1522,7 @@ components:
           example: "08:00-09:00"
     ReservationTemplateResponse:
       type: object
-      required: [sport_type, campus_name, venue_name, venue_site_id, spaces, time_slots]
+      required: [sport_type, campus_name, venue_name, venue_site_id, slots]
       description: 场馆固定结构信息，用于创建预约计划时选择时间段
       properties:
         sport_type:
@@ -1533,14 +1537,11 @@ components:
         venue_site_id:
           type: integer
           format: int64
-        spaces:
+        slots:
           type: array
+          description: 所有可选场次（space × timeslot 笛卡尔积），不含实时的 time_id/token
           items:
-            $ref: '#/components/schemas/ReservationTemplateSpace'
-        time_slots:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReservationTemplateTimeSlot'
+            $ref: '#/components/schemas/ReservationTemplateSlot'
     ReservationPlanSlotSelection:
       type: object
       required: [campus_name, venue_name, space_id, start_time, end_time]
