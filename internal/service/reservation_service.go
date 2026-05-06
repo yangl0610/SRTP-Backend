@@ -383,18 +383,56 @@ func isSlotAvailable(slot map[string]any) bool {
 	return true
 }
 
-// walkSlots walks through parsed JSON and visits each slot object.
+// walkSlots walks through parsed TYYS dayInfo JSON and visits each slot with its space context.
+//
+// TYYS dayInfo structure: space objects contain child objects keyed by timeId, where each
+// child has startDate/endDate. spaceId comes from the parent's "id" field; timeId is the key.
+// This function merges spaceId/spaceName/timeId into each slot before calling visit.
 func walkSlots(data []byte, visit func(map[string]any)) {
 	var payload any
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return
 	}
-	walkJSONObjects(payload, func(obj map[string]any) {
-		// A slot object has startDate and endDate fields
-		if _, hasStart := obj["startDate"]; hasStart {
-			visit(obj)
+	walkSlotsAny(payload, visit)
+}
+
+func walkSlotsAny(v any, visit func(map[string]any)) {
+	switch node := v.(type) {
+	case map[string]any:
+		spaceID := trimString(node["id"])
+		spaceName := trimString(node["spaceName"])
+		foundSlot := false
+		if spaceID != "" {
+			for key, val := range node {
+				child, ok := val.(map[string]any)
+				if !ok {
+					continue
+				}
+				if _, hasStart := child["startDate"]; !hasStart {
+					continue
+				}
+				// merge space context into slot
+				slot := make(map[string]any, len(child)+3)
+				for k, v := range child {
+					slot[k] = v
+				}
+				slot["spaceId"] = spaceID
+				slot["spaceName"] = spaceName
+				slot["timeId"] = key
+				visit(slot)
+				foundSlot = true
+			}
 		}
-	})
+		if !foundSlot {
+			for _, child := range node {
+				walkSlotsAny(child, visit)
+			}
+		}
+	case []any:
+		for _, item := range node {
+			walkSlotsAny(item, visit)
+		}
+	}
 }
 
 // venueOpenHour 返回指定校区+球类的 TYYS 预约开放小时（Asia/Shanghai）。
