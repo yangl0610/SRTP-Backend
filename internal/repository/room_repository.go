@@ -52,7 +52,7 @@ func (r *RoomRepository) GetByPublicID(ctx context.Context, publicID string) (*m
 	return &room, nil
 }
 
-func (r *RoomRepository) GetByInviteCode(ctx context.Context, code string) (*models.Room, error) {
+func (r *RoomRepository) GetByBuddyCode(ctx context.Context, code string) (*models.Room, error) {
 	var room models.Room
 	if err := r.db.WithContext(ctx).Preload("Owner").Where("invite_code = ?", code).First(&room).Error; err != nil {
 		return nil, err
@@ -235,4 +235,30 @@ func (r *RoomRepository) CountPendingJoinRequestsByUser(ctx context.Context, use
 		return 0, err
 	}
 	return count, nil
+}
+
+/*为了避免多次查询数据库*/
+func (r *RoomRepository) CountMembersByRoomIDs(ctx context.Context, roomIDs []uint) (map[uint]int64, error) {
+	var results []struct {
+		RoomID uint
+		Count  int64
+	}
+
+	err := r.db.WithContext(ctx).
+		Model(&models.RoomMember{}).
+		Select("room_id, COUNT(*) as count").
+		Where("room_id IN ? AND status = ?", roomIDs, "joined").
+		Group("room_id").
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	countMap := make(map[uint]int64)
+	for _, r := range results {
+		countMap[r.RoomID] = r.Count
+	}
+
+	return countMap, nil
 }

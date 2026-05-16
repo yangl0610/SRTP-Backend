@@ -160,6 +160,11 @@ func (h *Handler) ListRooms(c *gin.Context, params gen.ListRoomsParams) {
 	if params.Date != nil {
 		date = &params.Date.Time
 	}
+	pageSize := optionalInt32(params.PageSize, 20)
+	// 后端强制上限，防止一次性拉取过多数据
+	if pageSize > 100 {
+		pageSize = 100
+	}
 	rooms, err := h.roomService.List(c.Request.Context(), service.ListRoomsInput{
 		Keyword:      params.Keyword,
 		SportType:    params.SportType,
@@ -212,8 +217,8 @@ func (h *Handler) CreateRoom(c *gin.Context) {
 	response.JSON(c, http.StatusCreated, h.buildRoomDetail(c.Request.Context(), room, members))
 }
 
-func (h *Handler) GetRoomById(c *gin.Context, roomId int64) {
-	room, members, err := h.roomService.GetByID(c.Request.Context(), uint(roomId))
+func (h *Handler) GetRoomById(c *gin.Context, roomId openapi_types.UUID) {
+	room, members, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "room not found" {
 			response.Error(c, http.StatusNotFound, "room not found")
@@ -222,16 +227,40 @@ func (h *Handler) GetRoomById(c *gin.Context, roomId int64) {
 		response.Error(c, http.StatusInternalServerError, "failed to fetch room")
 		return
 	}
+	if room.Visibility=="private"{
+		currentUser,_:=h.userService.GetCurrent(c.Request.Context())
+		if currentUser==nil{
+			response.Error(c,http.StatusForbidden,"room is private")
+			return 
+		}
+		isOwner:=currentUser.ID==room.OwnerID
+		isMember:=false
+		for _,m:=range members{
+			if m.UserID==currentUser.ID && m.Status=="joined"{
+				isMember=true
+				break
+			}
+		}
+		if !isOwner && !isMember {
+			response.Error(c, http.StatusForbidden, "room is private")
+			return
+		}
+	}
 	response.JSON(c, http.StatusOK, h.buildRoomDetail(c.Request.Context(), room, members))
 }
 
-func (h *Handler) UpdateRoom(c *gin.Context, roomId int64) {
+func (h *Handler) UpdateRoom(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.UpdateRoomRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	room, err := h.roomService.Update(c.Request.Context(), uint(roomId), service.UpdateRoomInput{
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	room, err := h.roomService.Update(c.Request.Context(), existingRoom.ID, service.UpdateRoomInput{
 		Name:            req.Name,
 		Visibility:      req.Visibility,
 		JoinMode:        req.JoinMode,
@@ -256,8 +285,13 @@ func (h *Handler) UpdateRoom(c *gin.Context, roomId int64) {
 	response.JSON(c, http.StatusOK, h.buildRoomDetail(c.Request.Context(), room, members))
 }
 
-func (h *Handler) CloseRoom(c *gin.Context, roomId int64) {
-	room, err := h.roomService.Close(c.Request.Context(), uint(roomId))
+func (h *Handler) CloseRoom(c *gin.Context, roomId openapi_types.UUID) {
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	room, err := h.roomService.Close(c.Request.Context(), existingRoom.ID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -276,7 +310,7 @@ func (h *Handler) JoinRoomByCode(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	result, err := h.roomService.JoinByCode(c.Request.Context(), service.JoinRoomByCodeInput{InviteCode: req.InviteCode})
+	result, err := h.roomService.JoinByCode(c.Request.Context(), service.JoinRoomByCodeInput{BuddyCode: req.BuddyCode})
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -284,8 +318,13 @@ func (h *Handler) JoinRoomByCode(c *gin.Context) {
 	response.JSON(c, http.StatusOK, buildJoinRoomResult(result))
 }
 
-func (h *Handler) JoinRoomDirectly(c *gin.Context, roomId int64) {
-	result, err := h.roomService.JoinDirectly(c.Request.Context(), uint(roomId))
+func (h *Handler) JoinRoomDirectly(c *gin.Context, roomId openapi_types.UUID) {
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	result, err := h.roomService.JoinDirectly(c.Request.Context(), existingRoom.ID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -293,13 +332,18 @@ func (h *Handler) JoinRoomDirectly(c *gin.Context, roomId int64) {
 	response.JSON(c, http.StatusOK, buildJoinRoomResult(result))
 }
 
-func (h *Handler) CreateJoinRequest(c *gin.Context, roomId int64) {
+func (h *Handler) CreateJoinRequest(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.CreateJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	joinRequest, err := h.roomService.CreateJoinRequest(c.Request.Context(), uint(roomId), service.CreateJoinRequestInput{Message: req.Message})
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	joinRequest, err := h.roomService.CreateJoinRequest(c.Request.Context(), existingRoom.ID, service.CreateJoinRequestInput{Message: req.Message})
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -307,13 +351,18 @@ func (h *Handler) CreateJoinRequest(c *gin.Context, roomId int64) {
 	response.JSON(c, http.StatusCreated, gen.JoinRequestResponse{RequestId: int64(joinRequest.ID), Status: joinRequest.Status})
 }
 
-func (h *Handler) ApproveJoinRequest(c *gin.Context, roomId int64) {
+func (h *Handler) ApproveJoinRequest(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.ReviewJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	joinRequest, err := h.roomService.ApproveJoinRequest(c.Request.Context(), uint(roomId), service.ReviewJoinRequestInput{RequestID: uint(req.RequestId)})
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	joinRequest, err := h.roomService.ApproveJoinRequest(c.Request.Context(), existingRoom.ID, service.ReviewJoinRequestInput{RequestID: uint(req.RequestId)})
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -321,13 +370,19 @@ func (h *Handler) ApproveJoinRequest(c *gin.Context, roomId int64) {
 	response.JSON(c, http.StatusOK, gen.JoinRequestResponse{RequestId: int64(joinRequest.ID), Status: joinRequest.Status})
 }
 
-func (h *Handler) RejectJoinRequest(c *gin.Context, roomId int64) {
+
+func (h *Handler) RejectJoinRequest(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.ReviewJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	joinRequest, err := h.roomService.RejectJoinRequest(c.Request.Context(), uint(roomId), service.ReviewJoinRequestInput{RequestID: uint(req.RequestId)})
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	joinRequest, err := h.roomService.RejectJoinRequest(c.Request.Context(), existingRoom.ID, service.ReviewJoinRequestInput{RequestID: uint(req.RequestId)})
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -335,13 +390,18 @@ func (h *Handler) RejectJoinRequest(c *gin.Context, roomId int64) {
 	response.JSON(c, http.StatusOK, gen.JoinRequestResponse{RequestId: int64(joinRequest.ID), Status: joinRequest.Status})
 }
 
-func (h *Handler) InviteRoomMember(c *gin.Context, roomId int64) {
+func (h *Handler) InviteRoomMember(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.InviteMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	member, err := h.roomService.InviteMember(c.Request.Context(), uint(roomId), service.InviteMemberInput{UserID: uint(req.UserId)})
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	member, err := h.roomService.InviteMember(c.Request.Context(), existingRoom.ID, service.InviteMemberInput{UserID: uint(req.UserId)})
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -349,8 +409,13 @@ func (h *Handler) InviteRoomMember(c *gin.Context, roomId int64) {
 	response.JSON(c, http.StatusOK, gen.MemberActionResponse{RoomId: int64(member.RoomID), UserId: int64(member.UserID), Status: member.Status})
 }
 
-func (h *Handler) RemoveRoomMember(c *gin.Context, roomId int64, userId int64) {
-	member, err := h.roomService.RemoveMember(c.Request.Context(), uint(roomId), uint(userId))
+func (h *Handler) RemoveRoomMember(c *gin.Context, roomId openapi_types.UUID, userId int64) {
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	member, err := h.roomService.RemoveMember(c.Request.Context(), existingRoom.ID, uint(userId))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -380,42 +445,42 @@ func (h *Handler) ListReservationSlots(c *gin.Context, params gen.ListReservatio
 	response.JSON(c, http.StatusOK, resp)
 }
 
-func (h *Handler) PreviewRoomReservation(c *gin.Context, roomId int64) {
+func (h *Handler) PreviewRoomReservation(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.ReservationSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	preview, err := h.reservationService.Preview(c.Request.Context(), buildReservationPreviewInput(uint(roomId), req))
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	preview, err := h.reservationService.Preview(c.Request.Context(), buildReservationPreviewInput(existingRoom.ID, req))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	room, _, roomErr := h.roomService.GetByID(c.Request.Context(), uint(roomId))
-	if roomErr != nil {
-		response.Error(c, http.StatusInternalServerError, "failed to fetch room")
-		return
-	}
-	response.JSON(c, http.StatusOK, buildReservationPreviewResponse(preview, room.PublicID))
+	response.JSON(c, http.StatusOK, buildReservationPreviewResponse(preview, existingRoom.PublicID))
 }
 
-func (h *Handler) SubmitRoomReservation(c *gin.Context, roomId int64) {
+func (h *Handler) SubmitRoomReservation(c *gin.Context, roomId openapi_types.UUID) {
 	var req gen.ReservationSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	reservation, err := h.reservationService.Submit(c.Request.Context(), buildReservationPreviewInput(uint(roomId), req))
+	existingRoom, _, err := h.roomService.GetByPublicID(c.Request.Context(), roomId.String())
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	reservation, err := h.reservationService.Submit(c.Request.Context(), buildReservationPreviewInput(existingRoom.ID, req))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	room, _, roomErr := h.roomService.GetByID(c.Request.Context(), uint(roomId))
-	if roomErr != nil {
-		response.Error(c, http.StatusInternalServerError, "failed to fetch room")
-		return
-	}
-	response.JSON(c, http.StatusOK, buildReservationRecordResponse(reservation, room.PublicID))
+	response.JSON(c, http.StatusOK, buildReservationRecordResponse(reservation, existingRoom.PublicID))
 }
 
 func buildUserResponse(user *models.User) gen.UserResponse {
@@ -453,12 +518,28 @@ func buildRoomCard(item service.RoomCardItem) gen.RoomCard {
 }
 
 func (h *Handler) buildRoomDetail(ctx context.Context, room *models.Room, members []models.RoomMember) gen.RoomDetail {
-	memberItems := make([]gen.RoomMember, 0, len(members))
-	for _, member := range members {
-		memberItems = append(memberItems, gen.RoomMember{UserId: int64(member.UserID), UserPublicId: mustParseUUID(member.User.PublicID), Nickname: member.User.Nickname, AvatarUrl: member.User.AvatarURL, Role: member.Role, Status: member.Status})
-	}
 	currentUser, _ := h.userService.GetCurrent(ctx)
 	isOwner := currentUser != nil && currentUser.ID == room.OwnerID
+
+	isMember := false
+	for _, m := range members {
+		if currentUser != nil && m.UserID == currentUser.ID && m.Status == "joined" {
+			isMember = true
+			break
+		}
+	}
+	//控制邀请码
+	var inviteCode *string
+	if isOwner || isMember{
+		inviteCode=stringPtrOrNil(room.InviteCode)
+	}
+	memberItems := make([]gen.RoomMember, 0, len(members))
+	for _, member := range members {
+		if member.Status != "joined" {
+			continue
+		}
+		memberItems = append(memberItems, gen.RoomMember{UserId: int64(member.UserID), UserPublicId: mustParseUUID(member.User.PublicID), Nickname: member.User.Nickname, AvatarUrl: member.User.AvatarURL, Role: member.Role, Status: member.Status})
+	}
 	return gen.RoomDetail{
 		Id:                  int64(room.ID),
 		PublicId:            mustParseUUID(room.PublicID),
@@ -479,7 +560,7 @@ func (h *Handler) buildRoomDetail(ctx context.Context, room *models.Room, member
 		Organization:        stringPtrOrNil(room.Organization),
 		LevelDesc:           stringPtrOrNil(room.LevelDesc),
 		Description:         stringPtrOrNil(room.Description),
-		InviteCode:          stringPtrOrNil(room.InviteCode),
+		BuddyCode:           inviteCode,
 		Owner:               gen.RoomOwner{Id: int64(room.Owner.ID), PublicId: mustParseUUID(room.Owner.PublicID), Nickname: room.Owner.Nickname, AvatarUrl: room.Owner.AvatarURL},
 		Members:             memberItems,
 		CurrentMemberCount:  int32(countCurrentMembers(members)),

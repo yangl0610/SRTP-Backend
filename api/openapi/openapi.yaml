@@ -603,9 +603,8 @@ components:
       name: roomId
       required: true
       schema:
-        type: integer
-        format: int64
-        minimum: 1
+        type: string
+        format: uuid
     MemberUserIdPath:
       in: path
       name: userId
@@ -914,7 +913,7 @@ components:
           type: string
         description:
           type: string
-        invite_code:
+        buddy_code:
           type: string
         owner:
           $ref: '#/components/schemas/RoomOwner'
@@ -1013,9 +1012,9 @@ components:
           maxLength: 500
     JoinRoomByCodeRequest:
       type: object
-      required: [invite_code]
+      required: [buddy_code]
       properties:
-        invite_code:
+        buddy_code:
           type: string
           minLength: 1
           maxLength: 16

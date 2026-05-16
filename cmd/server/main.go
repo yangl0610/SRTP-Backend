@@ -47,14 +47,6 @@ func main() {
 		log.Fatal("initialize database", zap.Error(err))
 	}
 
-	if err := preparePublicIDColumns(gormDB); err != nil {
-		log.Fatal("prepare public_id columns", zap.Error(err))
-	}
-
-	if err := backfillPublicIDs(gormDB); err != nil {
-		log.Fatal("backfill public ids", zap.Error(err))
-	}
-
 	if err := gormDB.AutoMigrate(
 		&models.User{},
 		&models.Room{},
@@ -66,6 +58,14 @@ func main() {
 		&models.Notification{},
 	); err != nil {
 		log.Fatal("auto migrate models", zap.Error(err))
+	}
+
+	if err := preparePublicIDColumns(gormDB); err != nil {
+		log.Fatal("prepare public_id columns", zap.Error(err))
+	}
+
+	if err := backfillPublicIDs(gormDB); err != nil {
+		log.Fatal("backfill public ids", zap.Error(err))
 	}
 
 	sqlDB, err := gormDB.DB()

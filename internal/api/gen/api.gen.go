@@ -65,7 +65,7 @@ type JoinRequestResponse struct {
 
 // JoinRoomByCodeRequest defines model for JoinRoomByCodeRequest.
 type JoinRoomByCodeRequest struct {
-	InviteCode string `json:"invite_code"`
+	BuddyCode string `json:"buddy_code"`
 }
 
 // JoinRoomResult defines model for JoinRoomResult.
@@ -210,13 +210,13 @@ type RoomCardPage struct {
 
 // RoomDetail defines model for RoomDetail.
 type RoomDetail struct {
+	BuddyCode           *string            `json:"buddy_code,omitempty"`
 	CampusName          string             `json:"campus_name"`
 	CurrentMemberCount  int32              `json:"current_member_count"`
 	Description         *string            `json:"description,omitempty"`
 	EndTime             time.Time          `json:"end_time"`
 	GenderRule          *string            `json:"gender_rule,omitempty"`
 	Id                  int64              `json:"id"`
-	InviteCode          *string            `json:"invite_code,omitempty"`
 	IsOwner             bool               `json:"is_owner"`
 	JoinMode            string             `json:"join_mode"`
 	Joinable            bool               `json:"joinable"`
@@ -320,7 +320,7 @@ type PageQuery = int32
 type PageSizeQuery = int32
 
 // RoomIdPath defines model for RoomIdPath.
-type RoomIdPath = int64
+type RoomIdPath = openapi_types.UUID
 
 // UserIdPath defines model for UserIdPath.
 type UserIdPath = int64

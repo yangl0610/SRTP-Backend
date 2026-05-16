@@ -7,6 +7,9 @@ import (
 
 	"github.com/QSCTech/SRTP-Backend/internal/repository"
 	"github.com/QSCTech/SRTP-Backend/models"
+
+	"errors"
+	"gorm.io/gorm"
 )
 
 type RoomService struct {
@@ -62,7 +65,7 @@ type UpdateRoomInput struct {
 }
 
 type JoinRoomByCodeInput struct {
-	InviteCode string
+	BuddyCode string
 }
 
 type CreateJoinRequestInput struct {
@@ -103,8 +106,56 @@ type UserStatsOutput struct {
 	PendingJoinRequestCount int64
 }
 
+/*基础功能：拿数据、加工成RoomCardItem*/
 func (s *RoomService) List(ctx context.Context, input ListRoomsInput) (*ListRoomsOutput, error) {
-	return nil, fmt.Errorf("room service List not implemented")
+	filter := repository.RoomFilter{
+		Keyword:      input.Keyword,
+		SportType:    input.SportType,
+		Campus:       input.Campus,
+		Date:         input.Date,
+		TimeRange:    input.TimeRange,
+		Organization: input.Organization,
+		Level:        input.Level,
+		Page:         int(input.Page),
+		PageSize:     int(input.PageSize),
+	}
+
+	result, err := s.repo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	rooms := result.Items
+
+	roomIDs := make([]uint, 0, len(rooms))
+	for _, r := range rooms {
+		roomIDs = append(roomIDs, r.ID)
+	}
+
+	countMap := make(map[uint]int64)
+	if len(roomIDs) > 0 {
+		countMap, err = s.repo.CountMembersByRoomIDs(ctx, roomIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	items := make([]RoomCardItem, 0, len(rooms))
+	for _, r := range rooms {
+		count := countMap[r.ID]
+
+		items = append(items, RoomCardItem{
+			Room:               r,
+			CurrentMemberCount: int32(count),
+		})
+	}
+
+	return &ListRoomsOutput{
+		Page:     int32(input.Page),
+		PageSize: int32(input.PageSize),
+		Total:    result.Total,
+		Items:    items,
+	}, nil
 }
 
 func (s *RoomService) ListMineCreated(ctx context.Context, page, pageSize int) (*ListRoomsOutput, error) {
@@ -119,8 +170,42 @@ func (s *RoomService) GetMyStats(ctx context.Context) (*UserStatsOutput, error) 
 	return nil, fmt.Errorf("room service GetMyStats not implemented")
 }
 
+/*基础功能：拿数据、判断*/
+
+func (s *RoomService) GetByPublicID(ctx context.Context, publicID string) (*models.Room, []models.RoomMember, error) {
+    room, err := s.repo.GetByPublicID(ctx, publicID)
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            var ErrRoomNotFound = errors.New("room not found")
+            return nil, nil, ErrRoomNotFound
+        }
+        return nil, nil, err
+    }
+
+    members, err := s.repo.GetMembersByRoomID(ctx, room.ID)
+    if err != nil {
+        return nil, nil, err
+    }
+
+    return room, members, nil
+}
+
 func (s *RoomService) GetByID(ctx context.Context, id uint) (*models.Room, []models.RoomMember, error) {
-	return nil, nil, fmt.Errorf("room service GetByID not implemented")
+    room, err := s.repo.GetByID(ctx, id)
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            var ErrRoomNotFound = errors.New("room not found")
+			return nil, nil, ErrRoomNotFound
+        }
+        return nil, nil, err
+    }
+
+    members, err := s.repo.GetMembersByRoomID(ctx, id)
+    if err != nil {
+        return nil, nil, err
+    }
+
+    return room, members, nil
 }
 
 func (s *RoomService) Create(ctx context.Context, input CreateRoomInput) (*models.Room, error) {
