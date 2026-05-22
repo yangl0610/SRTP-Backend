@@ -172,13 +172,13 @@ func (s *ReservationService) cachedVenueInfo(ctx context.Context) (json.RawMessa
 }
 
 func (s *ReservationService) ListVenues(ctx context.Context, sportType, campus *string) []ReservationVenueItem {
-	resp, err := s.tyys.VenueInfo(ctx, 0)
-	if err != nil || resp == nil {
+	data, err := s.cachedVenueInfo(ctx)
+	if err != nil {
 		return nil
 	}
 
 	var result []ReservationVenueItem
-	walkVenues(resp.Data, func(obj map[string]any) {
+	walkVenues(data, func(obj map[string]any) {
 		sport := trimString(obj["sportName"])
 		camp := trimString(obj["campusName"])
 		venue := trimString(obj["venueName"])
@@ -259,15 +259,15 @@ func textMatches(got, want string) bool {
 }
 
 func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusName, venueName, reservationDate string) ([]ReservationSlotItem, error) {
-	// Step 1: 从 VenueInfo 找到 venueId / venueSiteId，同时解析 spaceId 列表供降级用。
-	venueResp, err := s.tyys.VenueInfo(ctx, 0)
+	// Step 1: 从 VenueInfo 找到 venueId / venueSiteId（使用缓存，避免重复打 TYYS）。
+	venueData, err := s.cachedVenueInfo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get venue info: %w", err)
 	}
 
 	var venueIDStr, venueSiteIDStr string
 	var resolvedCampus, resolvedVenue string
-	walkVenues(venueResp.Data, func(obj map[string]any) {
+	walkVenues(venueData, func(obj map[string]any) {
 		sportGot := trimString(obj["sportName"])
 		campusGot := trimString(obj["campusName"])
 		venueGot := trimString(obj["venueName"])
@@ -289,7 +289,13 @@ func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusNam
 	venueIDUint := parseUint(venueIDStr)
 	venueSiteIDUint := parseUint(venueSiteIDStr)
 
-	// Step 2: 尝试从 TYYS 获取实时 dayInfo。
+	// Step 2: 若预约窗口尚未开放，跳过实时 DayInfo 直接返回 template，避免无意义的 TYYS 请求。
+	// reserveOpenAt 用最早开放时间（按校区+球类），确保保守判断。
+	if openAt, oaErr := reserveOpenAt(reservationDate, campusName, sportType); oaErr == nil && time.Now().Before(openAt) {
+		return s.listSlotsFromTemplate(ctx, resolvedCampus, resolvedVenue, venueIDUint, venueSiteIDUint, nil), nil
+	}
+
+	// Step 3: 尝试从 TYYS 获取实时 dayInfo。
 	params := url.Values{}
 	params.Set("venueId", venueIDStr)
 	params.Set("venueSiteId", venueSiteIDStr)
@@ -300,12 +306,12 @@ func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusNam
 
 	dayResp, dayErr := s.tyys.ReservationDayInfo(ctx, params)
 
-	// Step 3: 若 dayInfo 失败（预约窗口未开放），降级为 template 数据，标记 available=false。
+	// Step 4: 若 dayInfo 失败（预约窗口未开放），降级为 template 数据，标记 available=false。
 	if dayErr != nil || dayResp == nil {
 		return s.listSlotsFromTemplate(ctx, resolvedCampus, resolvedVenue, venueIDUint, venueSiteIDUint, nil), nil
 	}
 
-	// Step 4: 解析 dayInfo，提取顶层 token/weekStartDate。
+	// Step 5: 解析 dayInfo，提取顶层 token/weekStartDate。
 	var topToken, topWeekStart string
 	var topObj map[string]any
 	if unmarshalErr := json.Unmarshal(dayResp.Data, &topObj); unmarshalErr == nil {
@@ -313,7 +319,7 @@ func (s *ReservationService) ListSlots(ctx context.Context, sportType, campusNam
 		topWeekStart = trimString(topObj["weekStartDate"])
 	}
 
-	// Step 5: 按 slot 构建完整上下文。
+	// Step 6: 按 slot 构建完整上下文。
 	var slots []ReservationSlotItem
 	walkSlots(dayResp.Data, func(slot map[string]any) {
 		spaceID := parseUint(trimString(slot["spaceId"]))
@@ -631,8 +637,9 @@ func (s *ReservationService) CreatePlan(ctx context.Context, input ReservationPl
 	return record, nil
 }
 
-// Preview 对每个候选 slot 调用 TYYS orderInfo 做预校验，不创建 DB 记录。
+// Preview 对每个候选 slot 并发调用 TYYS orderInfo 做预校验，不创建 DB 记录。
 // 返回全量 slot 校验结果，前端可据此展示哪些场地可预约并让用户二次确认。
+// 并发数限制为 3，避免对 TYYS 造成压力。
 func (s *ReservationService) Preview(ctx context.Context, input ReservationPreviewInput) (*ReservationPreviewOutput, error) {
 	if len(input.Slots) == 0 {
 		return nil, fmt.Errorf("preview requires at least one slot selection")
@@ -647,33 +654,49 @@ func (s *ReservationService) Preview(ctx context.Context, input ReservationPrevi
 	}
 
 	now := time.Now()
-	for _, slot := range input.Slots {
-		openAt, err := reserveOpenAt(input.ReservationDate, slot.CampusName, input.SportType)
-		if err == nil && now.Before(openAt) {
-			out.Slots = append(out.Slots, SlotPreviewItem{
-				Slot:      slot,
-				Available: false,
-				Error:     fmt.Sprintf("reservation window not open until %s", openAt.Format("2006-01-02 15:04")),
-			})
-			continue
-		}
-		form := url.Values{}
-		form.Set("venueSiteId", strconv.FormatUint(uint64(slot.VenueSiteID), 10))
-		form.Set("reservationDate", input.ReservationDate)
-		form.Set("weekStartDate", coalesce(slot.WeekStart, input.ReservationDate))
-		form.Set("token", slot.Token)
-		form.Set("reservationOrderJson", mustMarshalJSON([]map[string]any{{
-			"spaceId":           strconv.FormatUint(uint64(slot.SpaceID), 10),
-			"timeId":            strconv.FormatUint(uint64(slot.TimeID), 10),
-			"venueSpaceGroupId": nil,
-		}}))
-		_, tyysErr := s.tyys.ReservationOrderInfo(ctx, form)
-		item := SlotPreviewItem{Slot: slot, Available: tyysErr == nil}
-		if tyysErr != nil {
-			item.Error = tyysErr.Error()
-		}
-		out.Slots = append(out.Slots, item)
+	items := make([]SlotPreviewItem, len(input.Slots))
+	const maxConcurrent = 3
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+
+	for i, slot := range input.Slots {
+		i, slot := i, slot
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			openAt, err := reserveOpenAt(input.ReservationDate, slot.CampusName, input.SportType)
+			if err == nil && now.Before(openAt) {
+				items[i] = SlotPreviewItem{
+					Slot:      slot,
+					Available: false,
+					Error:     fmt.Sprintf("reservation window not open until %s", openAt.Format("2006-01-02 15:04")),
+				}
+				return
+			}
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			form := url.Values{}
+			form.Set("venueSiteId", strconv.FormatUint(uint64(slot.VenueSiteID), 10))
+			form.Set("reservationDate", input.ReservationDate)
+			form.Set("weekStartDate", coalesce(slot.WeekStart, input.ReservationDate))
+			form.Set("token", slot.Token)
+			form.Set("reservationOrderJson", mustMarshalJSON([]map[string]any{{
+				"spaceId":           strconv.FormatUint(uint64(slot.SpaceID), 10),
+				"timeId":            strconv.FormatUint(uint64(slot.TimeID), 10),
+				"venueSpaceGroupId": nil,
+			}}))
+			_, tyysErr := s.tyys.ReservationOrderInfo(ctx, form)
+			item := SlotPreviewItem{Slot: slot, Available: tyysErr == nil}
+			if tyysErr != nil {
+				item.Error = tyysErr.Error()
+			}
+			items[i] = item
+		}()
 	}
+
+	wg.Wait()
+	out.Slots = items
 	return out, nil
 }
 
