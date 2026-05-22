@@ -135,14 +135,40 @@ type MaterializeResult struct {
 	Errors    []string
 }
 
+type venueInfoCache struct {
+	mu        sync.Mutex
+	data      json.RawMessage
+	expiresAt time.Time
+}
+
+const venueInfoCacheTTL = 15 * time.Minute
+
 type ReservationService struct {
 	roomRepo        *repository.RoomRepository
 	reservationRepo *repository.ReservationRepository
 	tyys            *zjulogin.TYYS
+	venueCache      venueInfoCache
 }
 
 func NewReservationService(roomRepo *repository.RoomRepository, reservationRepo *repository.ReservationRepository, tyys *zjulogin.TYYS) *ReservationService {
 	return &ReservationService{roomRepo: roomRepo, reservationRepo: reservationRepo, tyys: tyys}
+}
+
+// cachedVenueInfo 返回带 TTL 缓存的 VenueInfo 数据，避免每次请求都打 TYYS。
+func (s *ReservationService) cachedVenueInfo(ctx context.Context) (json.RawMessage, error) {
+	s.venueCache.mu.Lock()
+	defer s.venueCache.mu.Unlock()
+
+	if s.venueCache.data != nil && time.Now().Before(s.venueCache.expiresAt) {
+		return s.venueCache.data, nil
+	}
+	resp, err := s.tyys.VenueInfo(ctx, 0)
+	if err != nil {
+		return nil, fmt.Errorf("get venue info: %w", err)
+	}
+	s.venueCache.data = resp.Data
+	s.venueCache.expiresAt = time.Now().Add(venueInfoCacheTTL)
+	return s.venueCache.data, nil
 }
 
 func (s *ReservationService) ListVenues(ctx context.Context, sportType, campus *string) []ReservationVenueItem {
@@ -462,21 +488,23 @@ type ReservationSubmitOrPlanResult struct {
 	Planned bool // true=创建了计划，false=直接提交
 }
 
-// SubmitOrPlan 统一预约入口：对开放窗口内的 slot 依次尝试实时提交，全部失败（或无窗口内 slot）时降级为创建远期计划。
-// 入参统一使用 ReservationPreviewInput；计划路径内部自动将 SlotSelection 降级为 PlanSlotSelection。
+// SubmitOrPlan 统一预约入口：对开放窗口内的 slot 依次尝试实时提交，全部失败（或无窗口内 slot）时，
+// 仅将窗口尚未开放的 slot 降级为远期计划。已开放但提交失败的 slot 不进计划（场地可能已满或不可预约）。
 func (s *ReservationService) SubmitOrPlan(ctx context.Context, input ReservationPreviewInput) (*ReservationSubmitOrPlanResult, error) {
 	if len(input.Slots) == 0 {
 		return nil, fmt.Errorf("submit or plan requires at least one slot selection")
 	}
 
 	now := time.Now()
-	var openSlots []SlotSelection
+	var openSlots, closedSlots []SlotSelection
 	for _, slot := range input.Slots {
 		openAt, err := reserveOpenAt(input.ReservationDate, slot.CampusName, input.SportType)
 		if err != nil {
 			continue
 		}
-		if !now.Before(openAt) {
+		if now.Before(openAt) {
+			closedSlots = append(closedSlots, slot)
+		} else {
 			openSlots = append(openSlots, slot)
 		}
 	}
@@ -492,21 +520,25 @@ func (s *ReservationService) SubmitOrPlan(ctx context.Context, input Reservation
 		if err == nil && record.ReservationStatus == "success" {
 			return &ReservationSubmitOrPlanResult{Record: record, Planned: false}, nil
 		}
+		// 实时提交失败：已开放的 slot 不落入计划，仅用 closedSlots 降级。
 	}
 
-	// 无开放窗口内的 slot，或全部提交失败，降级为计划
-	planSlots := make([]PlanSlotSelection, 0, len(input.Slots))
-	for _, s := range input.Slots {
-		siteID := s.VenueSiteID
+	if len(closedSlots) == 0 {
+		return nil, fmt.Errorf("real-time submission failed and no future slots available to plan")
+	}
+
+	planSlots := make([]PlanSlotSelection, 0, len(closedSlots))
+	for _, sl := range closedSlots {
+		siteID := sl.VenueSiteID
 		planSlots = append(planSlots, PlanSlotSelection{
-			CampusName:  s.CampusName,
-			VenueName:   s.VenueName,
-			VenueID:     s.VenueID,
+			CampusName:  sl.CampusName,
+			VenueName:   sl.VenueName,
+			VenueID:     sl.VenueID,
 			VenueSiteID: &siteID,
-			SpaceID:     s.SpaceID,
-			SpaceName:   s.SpaceName,
-			StartTime:   s.StartTime,
-			EndTime:     s.EndTime,
+			SpaceID:     sl.SpaceID,
+			SpaceName:   sl.SpaceName,
+			StartTime:   sl.StartTime,
+			EndTime:     sl.EndTime,
 		})
 	}
 	record, err := s.CreatePlan(ctx, ReservationPlanInput{

@@ -603,7 +603,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReservationRecordResponse'
+                $ref: '#/components/schemas/ReservationSubmitResult'
         '400':
           description: Invalid request
           content:
@@ -1421,6 +1421,17 @@ components:
           items:
             $ref: '#/components/schemas/ReservationPreviewItem'
           description: 每个候选 slot 的 TYYS orderInfo 校验结果
+    ReservationSubmitResult:
+      type: object
+      required:
+        - planned
+        - reservation
+      properties:
+        planned:
+          type: boolean
+          description: true 表示创建了远期计划，false 表示已实时提交成功
+        reservation:
+          $ref: '#/components/schemas/ReservationRecordResponse'
     ReservationRecordResponse:
       type: object
       required:

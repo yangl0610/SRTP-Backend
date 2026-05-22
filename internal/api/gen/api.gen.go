@@ -252,6 +252,13 @@ type ReservationSubmitRequest struct {
 	SportType string                     `json:"sport_type"`
 }
 
+// ReservationSubmitResult defines model for ReservationSubmitResult.
+type ReservationSubmitResult struct {
+	// Planned true 表示创建了远期计划，false 表示已实时提交成功
+	Planned     bool                      `json:"planned"`
+	Reservation ReservationRecordResponse `json:"reservation"`
+}
+
 // ReservationTemplateResponse 场馆固定结构信息，用于创建预约计划时选择时间段
 type ReservationTemplateResponse struct {
 	CampusName string `json:"campus_name"`
