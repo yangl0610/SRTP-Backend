@@ -514,7 +514,10 @@ func (h *Handler) SubmitRoomReservation(c *gin.Context, roomId gen.RoomPublicIdP
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.JSON(c, http.StatusOK, buildReservationRecordResponse(result.Record, room.PublicID))
+	response.JSON(c, http.StatusOK, gen.ReservationSubmitResult{
+		Planned:     result.Planned,
+		Reservation: buildReservationRecordResponse(result.Record, room.PublicID),
+	})
 }
 
 func (h *Handler) ListReservationTemplates(c *gin.Context, params gen.ListReservationTemplatesParams) {
